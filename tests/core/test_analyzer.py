@@ -1,6 +1,5 @@
 """Test name analysis functionality."""
 
-
 from taggrr.core.analyzer_config import (
     ConfigurableIDExtractor,
     ConfigurableNameAnalyzer,
@@ -20,7 +19,7 @@ class TestConfigurableIDExtractor:
             "FC2-PPV-1234567",
             "fc2-ppv-7654321",
             "FC2PPV-9999999",
-            "ppv-1111111"
+            "ppv-1111111",
         ]
 
         for test_text in test_cases:
@@ -39,12 +38,7 @@ class TestConfigurableIDExtractor:
         """Test DMM ID extraction."""
         extractor = ConfigurableIDExtractor(test_config)
 
-        test_cases = [
-            "MIDE-123",
-            "SSNI-456",
-            "ABP789",
-            "123456_001"
-        ]
+        test_cases = ["MIDE-123", "SSNI-456", "ABP789", "123456_001"]
 
         for test_text in test_cases:
             ids = extractor.extract_ids(test_text)
@@ -58,11 +52,7 @@ class TestConfigurableIDExtractor:
         """Test text with no recognizable IDs."""
         extractor = ConfigurableIDExtractor(test_config)
 
-        test_cases = [
-            "just_a_movie_title",
-            "no-numbers-here",
-            "random text"
-        ]
+        test_cases = ["just_a_movie_title", "no-numbers-here", "random text"]
 
         for test_text in test_cases:
             ids = extractor.extract_ids(test_text)
@@ -82,7 +72,7 @@ class TestConfigurableSourceDetector:
             ("[FC2] Video Title", "folder:[FC2]"),
             ("FC2-PPV-1234567.mp4", "file:FC2-*"),
             ("some ppv video", "file:*ppv*"),
-            ("folder with fc2 content", "folder:*fc2*")
+            ("folder with fc2 content", "folder:*fc2*"),
         ]
 
         for test_text, expected_pattern_type in test_cases:
@@ -102,7 +92,7 @@ class TestConfigurableSourceDetector:
             "[DMM] Movie Title",
             "[R18] Another Title",
             "movie-h.mp4",
-            "uncensored version"
+            "uncensored version",
         ]
 
         for test_text in test_cases:
@@ -143,7 +133,7 @@ class TestConfigurableNameAnalyzer:
             folder_name="FC2-PPV-1234567 Premium",
             file_name="FC2-PPV-1234567.mp4",
             detected_parts=[],
-            source_hints=[]
+            source_hints=[],
         )
 
         result = analyzer.analyze(video_file)
@@ -167,7 +157,7 @@ class TestConfigurableNameAnalyzer:
             folder_name="[DMM] Random Folder",
             file_name="MIDE-123.mp4",
             detected_parts=[],
-            source_hints=[]
+            source_hints=[],
         )
 
         result = analyzer.analyze(video_file)
@@ -190,7 +180,7 @@ class TestConfigurableNameAnalyzer:
             folder_name="[DMM] Folder",
             file_name="FC2-PPV-1234567.mp4",
             detected_parts=[],
-            source_hints=[]
+            source_hints=[],
         )
 
         result = analyzer.analyze(video_file)
@@ -224,7 +214,7 @@ class TestConfigurableNameAnalyzer:
             folder_name="CLEAR-ID-123 Folder",
             file_name="cryptic_filename.mp4",
             detected_parts=[],
-            source_hints=[]
+            source_hints=[],
         )
 
         result = analyzer.analyze(video_file)
@@ -246,7 +236,7 @@ class TestConfigurableNameAnalyzer:
             folder_name="Movie Title (2024)",
             file_name="movie.mp4",
             detected_parts=[],
-            source_hints=[]
+            source_hints=[],
         )
 
         result = analyzer.analyze(video_file)

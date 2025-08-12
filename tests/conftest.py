@@ -76,7 +76,7 @@ def sample_video_file(temp_dir):
         file_name="FC2-PPV-1234567.mp4",
         detected_parts=[],
         source_hints=[],
-        file_size=1024
+        file_size=1024,
     )
 
 
@@ -90,15 +90,15 @@ def sample_match_result():
             "id": "FC2-PPV-1234567",
             "description": "A test movie description",
             "poster_url": "https://example.com/poster.jpg",
-            "fanart_url": "https://example.com/fanart.jpg"
+            "fanart_url": "https://example.com/fanart.jpg",
         },
         confidence_breakdown=ConfidenceBreakdown(
             folder_name_match=0.8,
             file_name_match=0.9,
             source_match=0.85,
-            overall_confidence=0.87
+            overall_confidence=0.87,
         ),
         source=SourceType.FC2,
         suggested_output_name="Test Movie Title (2024)",
-        video_id="FC2-PPV-1234567"
+        video_id="FC2-PPV-1234567",
     )

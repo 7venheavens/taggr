@@ -1,6 +1,5 @@
 """Test configuration management functionality."""
 
-
 import pytest
 import yaml
 
@@ -46,17 +45,11 @@ class TestConfigManager:
 
         # Create config file manually
         config_data = {
-            "api": {
-                "base_url": "http://existing:8080",
-                "timeout": 60
-            },
-            "plex_output": {
-                "folder_format": "{title} [{year}]",
-                "create_nfo": False
-            }
+            "api": {"base_url": "http://existing:8080", "timeout": 60},
+            "plex_output": {"folder_format": "{title} [{year}]", "create_nfo": False},
         }
 
-        with open(config_path, 'w') as f:
+        with open(config_path, "w") as f:
             yaml.dump(config_data, f)
 
         # Load with manager
@@ -73,7 +66,7 @@ class TestConfigManager:
         config_path = temp_dir / "invalid_config.yaml"
 
         # Create invalid YAML
-        with open(config_path, 'w') as f:
+        with open(config_path, "w") as f:
             f.write("invalid: yaml: content: [")
 
         manager = ConfigManager(config_path)
@@ -133,9 +126,7 @@ class TestTaggerrConfig:
         """Test pattern configuration validation."""
         # Valid pattern
         pattern = PatternConfig(
-            regex=r"FC2-PPV-(\d+)",
-            format="FC2-PPV-{}",
-            confidence=0.95
+            regex=r"FC2-PPV-(\d+)", format="FC2-PPV-{}", confidence=0.95
         )
         assert pattern.confidence == 0.95
 
@@ -144,14 +135,14 @@ class TestTaggerrConfig:
             PatternConfig(
                 regex=r"test",
                 format="{}",
-                confidence=1.5  # > 1.0
+                confidence=1.5,  # > 1.0
             )
 
         with pytest.raises(ValueError):
             PatternConfig(
                 regex=r"test",
                 format="{}",
-                confidence=-0.1  # < 0.0
+                confidence=-0.1,  # < 0.0
             )
 
     def test_config_with_custom_patterns(self):
@@ -161,7 +152,7 @@ class TestTaggerrConfig:
                 regex=r"CUSTOM-(\d+)",
                 format="CUSTOM-{}",
                 confidence=0.8,
-                source="custom"
+                source="custom",
             )
         ]
 

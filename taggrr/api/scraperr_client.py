@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class APIResponse:
     """Response from scraperr API."""
+
     success: bool
     data: dict[str, Any] | None = None
     error: str | None = None
@@ -29,7 +30,7 @@ class ScraperAPIClient:
     def __init__(self, config: TaggerrConfig):
         """Initialize API client with configuration."""
         self.config = config
-        self.base_url = config.api.base_url.rstrip('/')
+        self.base_url = config.api.base_url.rstrip("/")
         self.timeout = config.api.timeout
         self.max_retries = config.api.retries
         self.retry_delay = config.api.retry_delay
@@ -37,7 +38,7 @@ class ScraperAPIClient:
         # HTTP client with custom timeout and retry settings
         self.client = httpx.AsyncClient(
             timeout=httpx.Timeout(self.timeout),
-            limits=httpx.Limits(max_keepalive_connections=5, max_connections=10)
+            limits=httpx.Limits(max_keepalive_connections=5, max_connections=10),
         )
 
     async def __aenter__(self):
@@ -52,18 +53,21 @@ class ScraperAPIClient:
         """Close the HTTP client."""
         await self.client.aclose()
 
-    async def search_video(self, video_id: str, source_hint: SourceType | None = None) -> APIResponse:
+    async def search_video(
+        self, video_id: str, source_hint: SourceType | None = None
+    ) -> APIResponse:
         """Search for video by ID."""
         endpoint = f"{self.base_url}/api/public/video/{video_id}"
 
         params = {}
         if source_hint and source_hint != SourceType.GENERIC:
-            params['source'] = source_hint.value
+            params["source"] = source_hint.value
 
         return await self._make_request("GET", endpoint, params=params)
 
-    async def search_multiple_ids(self, video_ids: list[str],
-                                source_hint: SourceType | None = None) -> dict[str, APIResponse]:
+    async def search_multiple_ids(
+        self, video_ids: list[str], source_hint: SourceType | None = None
+    ) -> dict[str, APIResponse]:
         """Search for multiple video IDs concurrently."""
         tasks = []
         for video_id in video_ids:
@@ -77,10 +81,7 @@ class ScraperAPIClient:
                 results[video_id] = response
             except Exception as e:
                 logger.error(f"Error searching for video ID '{video_id}': {e}")
-                results[video_id] = APIResponse(
-                    success=False,
-                    error=str(e)
-                )
+                results[video_id] = APIResponse(success=False, error=str(e))
 
         return results
 
@@ -99,7 +100,7 @@ class ScraperAPIClient:
             output_path.parent.mkdir(parents=True, exist_ok=True)
 
             # Write file
-            with open(output_path, 'wb') as f:
+            with open(output_path, "wb") as f:
                 f.write(response.content)
 
             logger.info(f"Downloaded asset to {output_path}")
@@ -109,19 +110,20 @@ class ScraperAPIClient:
             logger.error(f"Failed to download asset from {asset_url}: {e}")
             return False
 
-    async def _make_request(self, method: str, url: str,
-                          params: dict | None = None,
-                          json_data: dict | None = None) -> APIResponse:
+    async def _make_request(
+        self,
+        method: str,
+        url: str,
+        params: dict | None = None,
+        json_data: dict | None = None,
+    ) -> APIResponse:
         """Make HTTP request with retry logic."""
         last_exception = None
 
         for attempt in range(self.max_retries + 1):
             try:
                 response = await self.client.request(
-                    method=method,
-                    url=url,
-                    params=params,
-                    json=json_data
+                    method=method, url=url, params=params, json=json_data
                 )
 
                 # Handle different response codes
@@ -129,55 +131,57 @@ class ScraperAPIClient:
                     try:
                         data = response.json()
                         return APIResponse(
-                            success=True,
-                            data=data,
-                            status_code=response.status_code
+                            success=True, data=data, status_code=response.status_code
                         )
                     except Exception as e:
                         return APIResponse(
                             success=False,
                             error=f"Invalid JSON response: {e}",
-                            status_code=response.status_code
+                            status_code=response.status_code,
                         )
 
                 elif response.status_code == 404:
                     return APIResponse(
-                        success=False,
-                        error="Video not found",
-                        status_code=404
+                        success=False, error="Video not found", status_code=404
                     )
 
                 elif response.status_code == 429:
                     # Rate limited - wait longer before retry
                     if attempt < self.max_retries:
-                        wait_time = self.retry_delay * (2 ** attempt)  # Exponential backoff
-                        logger.warning(f"Rate limited, waiting {wait_time}s before retry")
+                        wait_time = self.retry_delay * (
+                            2**attempt
+                        )  # Exponential backoff
+                        logger.warning(
+                            f"Rate limited, waiting {wait_time}s before retry"
+                        )
                         await asyncio.sleep(wait_time)
                         continue
                     return APIResponse(
-                        success=False,
-                        error="Rate limited",
-                        status_code=429
+                        success=False, error="Rate limited", status_code=429
                     )
 
                 else:
                     return APIResponse(
                         success=False,
                         error=f"HTTP {response.status_code}: {response.text}",
-                        status_code=response.status_code
+                        status_code=response.status_code,
                     )
 
             except httpx.TimeoutException as e:
                 last_exception = e
                 if attempt < self.max_retries:
-                    logger.warning(f"Request timeout, retrying... (attempt {attempt + 1}/{self.max_retries + 1})")
+                    logger.warning(
+                        f"Request timeout, retrying... (attempt {attempt + 1}/{self.max_retries + 1})"
+                    )
                     await asyncio.sleep(self.retry_delay)
                     continue
 
             except httpx.ConnectError as e:
                 last_exception = e
                 if attempt < self.max_retries:
-                    logger.warning(f"Connection error, retrying... (attempt {attempt + 1}/{self.max_retries + 1})")
+                    logger.warning(
+                        f"Connection error, retrying... (attempt {attempt + 1}/{self.max_retries + 1})"
+                    )
                     await asyncio.sleep(self.retry_delay)
                     continue
 
@@ -188,7 +192,7 @@ class ScraperAPIClient:
 
         return APIResponse(
             success=False,
-            error=f"Request failed after {self.max_retries + 1} attempts: {last_exception}"
+            error=f"Request failed after {self.max_retries + 1} attempts: {last_exception}",
         )
 
 
@@ -199,8 +203,12 @@ class MetadataProcessor:
         """Initialize processor with configuration."""
         self.config = config
 
-    def process_search_response(self, api_response: APIResponse,
-                              original_id: str, source_hint: SourceType | None = None) -> MatchResult | None:
+    def process_search_response(
+        self,
+        api_response: APIResponse,
+        original_id: str,
+        source_hint: SourceType | None = None,
+    ) -> MatchResult | None:
         """Process API search response into MatchResult."""
         if not api_response.success or not api_response.data:
             return None
@@ -209,24 +217,28 @@ class MetadataProcessor:
             data = api_response.data
 
             # Extract basic metadata
-            title = data.get('title', 'Unknown Title')
-            year = data.get('year')
-            video_id = data.get('id', original_id)
+            title = data.get("title", "Unknown Title")
+            year = data.get("year")
+            video_id = data.get("id", original_id)
 
             # Create Plex-compatible metadata
             plex_metadata = PlexMetadata(
                 title=title,
                 year=year,
-                poster_url=data.get('poster_url'),
-                fanart_url=data.get('fanart_url'),
-                plot=data.get('description'),
-                genre=data.get('genres', []) if isinstance(data.get('genres'), list) else None,
-                director=data.get('director'),
-                duration=data.get('duration')
+                poster_url=data.get("poster_url"),
+                fanart_url=data.get("fanart_url"),
+                plot=data.get("description"),
+                genre=data.get("genres", [])
+                if isinstance(data.get("genres"), list)
+                else None,
+                director=data.get("director"),
+                duration=data.get("duration"),
             )
 
             # Calculate confidence based on match quality
-            confidence = self._calculate_match_confidence(data, original_id, source_hint)
+            confidence = self._calculate_match_confidence(
+                data, original_id, source_hint
+            )
 
             # Determine source from API response or hint
             detected_source = self._determine_source(data, source_hint)
@@ -240,51 +252,54 @@ class MetadataProcessor:
                 source=detected_source,
                 suggested_output_name=output_name,
                 video_id=video_id,
-                api_response=data
+                api_response=data,
             )
 
         except Exception as e:
             logger.error(f"Error processing API response: {e}")
             return None
 
-    def _calculate_match_confidence(self, data: dict, original_id: str,
-                                  source_hint: SourceType | None = None) -> ConfidenceBreakdown:
+    def _calculate_match_confidence(
+        self, data: dict, original_id: str, source_hint: SourceType | None = None
+    ) -> ConfidenceBreakdown:
         """Calculate confidence scores for the match."""
         # Base confidence from API response
-        api_confidence = data.get('confidence', 0.8)  # Default if not provided
+        api_confidence = data.get("confidence", 0.8)  # Default if not provided
 
         # ID match confidence
-        id_match = 0.9 if data.get('id') == original_id else 0.7
+        id_match = 0.9 if data.get("id") == original_id else 0.7
 
         # Source match confidence
         source_match = 0.8
         if source_hint and source_hint != SourceType.GENERIC:
-            detected_source = data.get('source', '').lower()
+            detected_source = data.get("source", "").lower()
             if detected_source == source_hint.value:
                 source_match = 0.95
             elif detected_source and detected_source != source_hint.value:
                 source_match = 0.6  # Conflicting sources
 
         # Overall confidence calculation
-        overall = (api_confidence * 0.4 + id_match * 0.4 + source_match * 0.2)
+        overall = api_confidence * 0.4 + id_match * 0.4 + source_match * 0.2
 
         return ConfidenceBreakdown(
             folder_name_match=0.0,  # Not applicable for API matches
-            file_name_match=0.0,    # Not applicable for API matches
+            file_name_match=0.0,  # Not applicable for API matches
             source_match=source_match,
-            overall_confidence=overall
+            overall_confidence=overall,
         )
 
-    def _determine_source(self, data: dict, source_hint: SourceType | None = None) -> SourceType:
+    def _determine_source(
+        self, data: dict, source_hint: SourceType | None = None
+    ) -> SourceType:
         """Determine the source type from API response."""
-        api_source = data.get('source', '').lower()
+        api_source = data.get("source", "").lower()
 
         # Map API source strings to SourceType
         source_mapping = {
-            'fc2': SourceType.FC2,
-            'fc2-ppv': SourceType.FC2,
-            'dmm': SourceType.DMM,
-            'r18': SourceType.DMM,
+            "fc2": SourceType.FC2,
+            "fc2-ppv": SourceType.FC2,
+            "dmm": SourceType.DMM,
+            "r18": SourceType.DMM,
         }
 
         detected_source = source_mapping.get(api_source, SourceType.GENERIC)
@@ -314,57 +329,91 @@ class VideoMatcher:
         self.config = config
         self.processor = MetadataProcessor(config)
 
-    async def match_video(self, primary_id: str, alternative_ids: list[str],
-                         source_hint: SourceType | None = None) -> MatchResult | None:
+    async def match_video(
+        self,
+        primary_id: str,
+        alternative_ids: list[str],
+        source_hint: SourceType | None = None,
+    ) -> MatchResult | None:
         """Match video using primary ID and alternatives."""
         async with ScraperAPIClient(self.config) as client:
             # Try primary ID first
             response = await client.search_video(primary_id, source_hint)
-            match = self.processor.process_search_response(response, primary_id, source_hint)
+            match = self.processor.process_search_response(
+                response, primary_id, source_hint
+            )
 
             if match and match.confidence_breakdown.overall_confidence > 0.6:
-                logger.info(f"Found match for primary ID '{primary_id}' with confidence {match.confidence_breakdown.overall_confidence:.2f}")
+                logger.info(
+                    f"Found match for primary ID '{primary_id}' with confidence {match.confidence_breakdown.overall_confidence:.2f}"
+                )
                 return match
 
             # Try alternative IDs if primary failed
             if alternative_ids:
-                logger.info(f"Primary ID failed, trying {len(alternative_ids)} alternatives")
+                logger.info(
+                    f"Primary ID failed, trying {len(alternative_ids)} alternatives"
+                )
 
                 for alt_id in alternative_ids:
                     response = await client.search_video(alt_id, source_hint)
-                    match = self.processor.process_search_response(response, alt_id, source_hint)
+                    match = self.processor.process_search_response(
+                        response, alt_id, source_hint
+                    )
 
                     if match and match.confidence_breakdown.overall_confidence > 0.5:
-                        logger.info(f"Found match for alternative ID '{alt_id}' with confidence {match.confidence_breakdown.overall_confidence:.2f}")
+                        logger.info(
+                            f"Found match for alternative ID '{alt_id}' with confidence {match.confidence_breakdown.overall_confidence:.2f}"
+                        )
                         return match
 
             logger.warning(f"No suitable matches found for video ID '{primary_id}'")
             return None
 
-    async def download_assets(self, match_result: MatchResult, output_dir: Path) -> list[str]:
+    async def download_assets(
+        self, match_result: MatchResult, output_dir: Path
+    ) -> list[str]:
         """Download video assets (poster, fanart, etc.)."""
         if not self.config.plex_output.download_assets:
             return []
 
         downloaded = []
         async with ScraperAPIClient(self.config) as client:
-
             # Download poster
-            if (match_result.api_response and
-                'poster' in self.config.plex_output.asset_types and
-                match_result.api_response.get('poster_url')):
-
+            if (
+                match_result.api_response
+                and "poster" in self.config.plex_output.asset_types
+                and match_result.api_response.get("poster_url")
+            ):
                 poster_path = output_dir / "poster.jpg"
-                if await client.download_asset(match_result.api_response['poster_url'], poster_path):
+                if await client.download_asset(
+                    match_result.api_response["poster_url"], poster_path
+                ):
                     downloaded.append("poster.jpg")
 
             # Download fanart
-            if (match_result.api_response and
-                'fanart' in self.config.plex_output.asset_types and
-                match_result.api_response.get('fanart_url')):
-
+            if (
+                match_result.api_response
+                and "fanart" in self.config.plex_output.asset_types
+                and match_result.api_response.get("fanart_url")
+            ):
                 fanart_path = output_dir / "fanart.jpg"
-                if await client.download_asset(match_result.api_response['fanart_url'], fanart_path):
+                if await client.download_asset(
+                    match_result.api_response["fanart_url"], fanart_path
+                ):
                     downloaded.append("fanart.jpg")
+
+            # Download thumbnail if no poster available
+            if (
+                match_result.api_response
+                and match_result.api_response.get("thumbnail_url")
+                and match_result.api_response["thumbnail_url"].strip()
+                and not match_result.api_response.get("poster_url")
+            ):
+                thumb_path = output_dir / "thumb.jpg"
+                if await client.download_asset(
+                    match_result.api_response["thumbnail_url"], thumb_path
+                ):
+                    downloaded.append("thumb.jpg")
 
         return downloaded

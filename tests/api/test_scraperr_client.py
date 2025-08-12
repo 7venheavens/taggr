@@ -25,13 +25,9 @@ class TestAPIResponse:
             "title": "Test Movie",
             "year": 2024,
             "source": "fc2",
-            "confidence": 0.95
+            "confidence": 0.95,
         }
-        response = APIResponse(
-            success=True,
-            data=data,
-            status_code=200
-        )
+        response = APIResponse(success=True, data=data, status_code=200)
 
         assert response.success is True
         assert response.data == data
@@ -40,11 +36,7 @@ class TestAPIResponse:
 
     def test_create_error_response(self):
         """Test creating error API response."""
-        response = APIResponse(
-            success=False,
-            error="Video not found",
-            status_code=404
-        )
+        response = APIResponse(success=False, error="Video not found", status_code=404)
 
         assert response.success is False
         assert response.error == "Video not found"
@@ -81,7 +73,7 @@ class TestScraperAPIClient:
             "director": "Test Director",
             "duration": 7200,
             "rating": 8.5,
-            "studio": "Test Studio"
+            "studio": "Test Studio",
         }
         mock_client.client.request.return_value = mock_response
 
@@ -109,7 +101,7 @@ class TestScraperAPIClient:
         mock_response.json.return_value = {
             "id": "TEST-123",
             "title": "Generic Video",
-            "source": "generic"
+            "source": "generic",
         }
         mock_client.client.request.return_value = mock_response
 
@@ -154,11 +146,11 @@ class TestScraperAPIClient:
         # First call is rate limited, second succeeds
         responses = [
             Mock(status_code=429),
-            Mock(status_code=200, json=lambda: {"id": "test", "title": "Test"})
+            Mock(status_code=200, json=lambda: {"id": "test", "title": "Test"}),
         ]
         mock_client.client.request.side_effect = responses
 
-        with patch('asyncio.sleep', new_callable=AsyncMock) as mock_sleep:
+        with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
             result = await mock_client.search_video("test")
 
         assert result.success is True
@@ -173,7 +165,7 @@ class TestScraperAPIClient:
         mock_response.status_code = 429
         mock_client.client.request.return_value = mock_response
 
-        with patch('asyncio.sleep', new_callable=AsyncMock):
+        with patch("asyncio.sleep", new_callable=AsyncMock):
             result = await mock_client.search_video("test")
 
         assert result.success is False
@@ -199,6 +191,7 @@ class TestScraperAPIClient:
     @pytest.mark.asyncio
     async def test_search_multiple_ids(self, mock_client):
         """Test searching multiple IDs concurrently."""
+
         def mock_request(method, url, **kwargs):
             """Mock request that returns different responses based on URL."""
             if "FC2-PPV-1111111" in url:
@@ -207,8 +200,8 @@ class TestScraperAPIClient:
                     json=lambda: {
                         "id": "FC2-PPV-1111111",
                         "title": "Video 1",
-                        "source": "fc2"
-                    }
+                        "source": "fc2",
+                    },
                 )
             elif "FC2-PPV-2222222" in url:
                 return Mock(status_code=404)
@@ -218,15 +211,15 @@ class TestScraperAPIClient:
                     json=lambda: {
                         "id": "FC2-PPV-3333333",
                         "title": "Video 3",
-                        "source": "fc2"
-                    }
+                        "source": "fc2",
+                    },
                 )
 
         mock_client.client.request.side_effect = mock_request
 
-        results = await mock_client.search_multiple_ids([
-            "FC2-PPV-1111111", "FC2-PPV-2222222", "FC2-PPV-3333333"
-        ], SourceType.FC2)
+        results = await mock_client.search_multiple_ids(
+            ["FC2-PPV-1111111", "FC2-PPV-2222222", "FC2-PPV-3333333"], SourceType.FC2
+        )
 
         assert len(results) == 3
         assert results["FC2-PPV-1111111"].success is True
@@ -237,9 +230,12 @@ class TestScraperAPIClient:
     @pytest.mark.asyncio
     async def test_search_multiple_ids_with_exception(self, mock_client):
         """Test multiple ID search with exception handling."""
+
         def mock_request(method, url, **kwargs):
             if "good_id" in url:
-                return Mock(status_code=200, json=lambda: {"id": "good_id", "title": "Good"})
+                return Mock(
+                    status_code=200, json=lambda: {"id": "good_id", "title": "Good"}
+                )
             else:
                 raise httpx.TimeoutException("Timeout")
 
@@ -265,7 +261,7 @@ class TestScraperAPIClient:
             "genres": ["Action", "Adventure"],
             "director": "Famous Director",
             "rating": 9.2,
-            "studio": "Premium Studio"
+            "studio": "Premium Studio",
         }
         mock_client.client.request.return_value = mock_response
 
@@ -291,7 +287,9 @@ class TestScraperAPIClient:
         mock_client.client.get.return_value = mock_response
 
         output_path = temp_dir / "assets" / "poster.jpg"
-        result = await mock_client.download_asset("https://example.com/poster.jpg", output_path)
+        result = await mock_client.download_asset(
+            "https://example.com/poster.jpg", output_path
+        )
 
         assert result is True
         assert output_path.exists()
@@ -314,7 +312,9 @@ class TestScraperAPIClient:
         mock_client.client.get.return_value = mock_response
 
         output_path = temp_dir / "poster.jpg"
-        result = await mock_client.download_asset("https://example.com/missing.jpg", output_path)
+        result = await mock_client.download_asset(
+            "https://example.com/missing.jpg", output_path
+        )
 
         assert result is False
         assert not output_path.exists()
@@ -324,7 +324,7 @@ class TestScraperAPIClient:
         """Test async context manager functionality."""
         async with ScraperAPIClient(test_config) as client:
             assert client.client is not None
-            assert hasattr(client.client, 'get')
+            assert hasattr(client.client, "get")
 
         # Client should be closed after context exit
         # Note: We can't test the exact exception since it depends on httpx internals
@@ -355,8 +355,8 @@ class TestMetadataProcessor:
                 "confidence": 0.95,
                 "genres": ["Action", "Drama"],
                 "director": "Test Director",
-                "duration": 7200
-            }
+                "duration": 7200,
+            },
         )
 
         result = processor.process_search_response(
@@ -375,11 +375,7 @@ class TestMetadataProcessor:
         """Test processing response without year."""
         api_response = APIResponse(
             success=True,
-            data={
-                "id": "TEST-123",
-                "title": "Movie Without Year",
-                "source": "generic"
-            }
+            data={"id": "TEST-123", "title": "Movie Without Year", "source": "generic"},
         )
 
         result = processor.process_search_response(api_response, "TEST-123")
@@ -389,10 +385,7 @@ class TestMetadataProcessor:
 
     def test_process_failed_response(self, processor):
         """Test processing failed API response."""
-        api_response = APIResponse(
-            success=False,
-            error="Video not found"
-        )
+        api_response = APIResponse(success=False, error="Video not found")
 
         result = processor.process_search_response(api_response, "nonexistent")
 
@@ -400,10 +393,7 @@ class TestMetadataProcessor:
 
     def test_process_empty_data_response(self, processor):
         """Test processing response with empty data."""
-        api_response = APIResponse(
-            success=True,
-            data=None
-        )
+        api_response = APIResponse(success=True, data=None)
 
         result = processor.process_search_response(api_response, "test")
 
@@ -411,11 +401,7 @@ class TestMetadataProcessor:
 
     def test_calculate_match_confidence_exact_match(self, processor):
         """Test confidence calculation with exact ID match."""
-        data = {
-            "id": "FC2-PPV-1234567",
-            "confidence": 0.9,
-            "source": "fc2"
-        }
+        data = {"id": "FC2-PPV-1234567", "confidence": 0.9, "source": "fc2"}
 
         confidence = processor._calculate_match_confidence(
             data, "FC2-PPV-1234567", SourceType.FC2
@@ -427,11 +413,7 @@ class TestMetadataProcessor:
 
     def test_calculate_confidence_different_id(self, processor):
         """Test confidence calculation with different ID."""
-        data = {
-            "id": "DIFFERENT-123",
-            "confidence": 0.8,
-            "source": "fc2"
-        }
+        data = {"id": "DIFFERENT-123", "confidence": 0.8, "source": "fc2"}
 
         confidence = processor._calculate_match_confidence(
             data, "FC2-PPV-1234567", SourceType.FC2
@@ -445,11 +427,13 @@ class TestMetadataProcessor:
         data = {
             "id": "TEST-123",
             "confidence": 0.9,
-            "source": "dmm"  # Different from hint
+            "source": "dmm",  # Different from hint
         }
 
         confidence = processor._calculate_match_confidence(
-            data, "TEST-123", SourceType.FC2  # Hint is FC2
+            data,
+            "TEST-123",
+            SourceType.FC2,  # Hint is FC2
         )
 
         assert confidence.source_match < 0.7  # Lower due to source conflict
@@ -458,7 +442,7 @@ class TestMetadataProcessor:
         """Test confidence calculation when API doesn't provide confidence."""
         data = {
             "id": "TEST-123",
-            "source": "fc2"
+            "source": "fc2",
             # No 'confidence' field
         }
 
@@ -506,11 +490,7 @@ class TestMetadataProcessor:
     def test_process_response_with_malformed_data(self, processor):
         """Test processing response with malformed data."""
         api_response = APIResponse(
-            success=True,
-            data={
-                "invalid": "structure",
-                "missing": "required_fields"
-            }
+            success=True, data={"invalid": "structure", "missing": "required_fields"}
         )
 
         # Should handle gracefully and not crash
@@ -524,11 +504,11 @@ class TestMetadataProcessor:
         """Test processing response that raises exception."""
         api_response = APIResponse(
             success=True,
-            data={"title": None}  # This might cause issues in processing
+            data={"title": None},  # This might cause issues in processing
         )
 
         # Mock the processing to raise an exception
-        with patch.object(processor, '_generate_output_name') as mock_gen:
+        with patch.object(processor, "_generate_output_name") as mock_gen:
             mock_gen.side_effect = Exception("Processing error")
 
             result = processor.process_search_response(api_response, "test")
@@ -552,25 +532,33 @@ class TestVideoMatcher:
             confidence_breakdown=ConfidenceBreakdown(0.8, 0.8, 0.9, 0.85),
             source=SourceType.FC2,
             suggested_output_name="Test Video (2024)",
-            video_id="FC2-PPV-1234567"
+            video_id="FC2-PPV-1234567",
         )
 
-        with patch.object(matcher.processor, 'process_search_response') as mock_process:
+        with patch.object(matcher.processor, "process_search_response") as mock_process:
             mock_process.return_value = mock_match_result
 
-            with patch('taggrr.api.scraperr_client.ScraperAPIClient') as mock_client_class:
+            with patch(
+                "taggrr.api.scraperr_client.ScraperAPIClient"
+            ) as mock_client_class:
                 mock_client = AsyncMock()
                 mock_client_class.return_value.__aenter__.return_value = mock_client
-                mock_client.search_video.return_value = APIResponse(success=True, data={})
+                mock_client.search_video.return_value = APIResponse(
+                    success=True, data={}
+                )
 
-                result = await matcher.match_video("FC2-PPV-1234567", [], SourceType.FC2)
+                result = await matcher.match_video(
+                    "FC2-PPV-1234567", [], SourceType.FC2
+                )
 
         assert result is not None
         assert result.video_id == "FC2-PPV-1234567"
         assert result.confidence_breakdown.overall_confidence == 0.85
 
         # Should only try primary ID
-        mock_client.search_video.assert_called_once_with("FC2-PPV-1234567", SourceType.FC2)
+        mock_client.search_video.assert_called_once_with(
+            "FC2-PPV-1234567", SourceType.FC2
+        )
 
     @pytest.mark.asyncio
     async def test_match_video_primary_low_confidence(self, matcher):
@@ -580,7 +568,7 @@ class TestVideoMatcher:
             confidence_breakdown=ConfidenceBreakdown(0.3, 0.3, 0.3, 0.3),
             source=SourceType.FC2,
             suggested_output_name="Test",
-            video_id="FC2-PPV-1234567"
+            video_id="FC2-PPV-1234567",
         )
 
         high_confidence_result = MatchResult(
@@ -588,18 +576,24 @@ class TestVideoMatcher:
             confidence_breakdown=ConfidenceBreakdown(0.8, 0.8, 0.8, 0.8),
             source=SourceType.FC2,
             suggested_output_name="Test Alternative",
-            video_id="ALT-456"
+            video_id="ALT-456",
         )
 
-        with patch.object(matcher.processor, 'process_search_response') as mock_process:
+        with patch.object(matcher.processor, "process_search_response") as mock_process:
             mock_process.side_effect = [low_confidence_result, high_confidence_result]
 
-            with patch('taggrr.api.scraperr_client.ScraperAPIClient') as mock_client_class:
+            with patch(
+                "taggrr.api.scraperr_client.ScraperAPIClient"
+            ) as mock_client_class:
                 mock_client = AsyncMock()
                 mock_client_class.return_value.__aenter__.return_value = mock_client
-                mock_client.search_video.return_value = APIResponse(success=True, data={})
+                mock_client.search_video.return_value = APIResponse(
+                    success=True, data={}
+                )
 
-                result = await matcher.match_video("FC2-PPV-1234567", ["ALT-456"], SourceType.FC2)
+                result = await matcher.match_video(
+                    "FC2-PPV-1234567", ["ALT-456"], SourceType.FC2
+                )
 
         assert result is not None
         assert result.video_id == "ALT-456"  # Should use alternative
@@ -616,16 +610,20 @@ class TestVideoMatcher:
             confidence_breakdown=ConfidenceBreakdown(0.3, 0.3, 0.3, 0.3),
             source=SourceType.GENERIC,
             suggested_output_name="Test",
-            video_id="TEST-123"
+            video_id="TEST-123",
         )
 
-        with patch.object(matcher.processor, 'process_search_response') as mock_process:
+        with patch.object(matcher.processor, "process_search_response") as mock_process:
             mock_process.return_value = low_confidence_result
 
-            with patch('taggrr.api.scraperr_client.ScraperAPIClient') as mock_client_class:
+            with patch(
+                "taggrr.api.scraperr_client.ScraperAPIClient"
+            ) as mock_client_class:
                 mock_client = AsyncMock()
                 mock_client_class.return_value.__aenter__.return_value = mock_client
-                mock_client.search_video.return_value = APIResponse(success=True, data={})
+                mock_client.search_video.return_value = APIResponse(
+                    success=True, data={}
+                )
 
                 result = await matcher.match_video("TEST-123", [])
 
@@ -637,10 +635,12 @@ class TestVideoMatcher:
     @pytest.mark.asyncio
     async def test_match_video_all_alternatives_fail(self, matcher):
         """Test when all IDs fail to match."""
-        with patch.object(matcher.processor, 'process_search_response') as mock_process:
+        with patch.object(matcher.processor, "process_search_response") as mock_process:
             mock_process.return_value = None  # All searches fail
 
-            with patch('taggrr.api.scraperr_client.ScraperAPIClient') as mock_client_class:
+            with patch(
+                "taggrr.api.scraperr_client.ScraperAPIClient"
+            ) as mock_client_class:
                 mock_client = AsyncMock()
                 mock_client_class.return_value.__aenter__.return_value = mock_client
                 mock_client.search_video.return_value = APIResponse(success=False)
@@ -662,11 +662,11 @@ class TestVideoMatcher:
             suggested_output_name="Test Movie",
             api_response={
                 "poster_url": "https://example.com/poster.jpg",
-                "fanart_url": "https://example.com/fanart.jpg"
-            }
+                "fanart_url": "https://example.com/fanart.jpg",
+            },
         )
 
-        with patch('taggrr.api.scraperr_client.ScraperAPIClient') as mock_client_class:
+        with patch("taggrr.api.scraperr_client.ScraperAPIClient") as mock_client_class:
             mock_client = AsyncMock()
             mock_client_class.return_value.__aenter__.return_value = mock_client
             mock_client.download_asset.return_value = True
@@ -680,7 +680,7 @@ class TestVideoMatcher:
         # Verify download calls with correct paths
         expected_calls = [
             (match_result.api_response["poster_url"], temp_dir / "poster.jpg"),
-            (match_result.api_response["fanart_url"], temp_dir / "fanart.jpg")
+            (match_result.api_response["fanart_url"], temp_dir / "fanart.jpg"),
         ]
 
         actual_calls = mock_client.download_asset.call_args_list
@@ -701,7 +701,7 @@ class TestVideoMatcher:
             confidence_breakdown=ConfidenceBreakdown(0.8, 0.8, 0.8, 0.8),
             source=SourceType.FC2,
             suggested_output_name="Test",
-            api_response={"poster_url": "https://example.com/poster.jpg"}
+            api_response={"poster_url": "https://example.com/poster.jpg"},
         )
 
         downloaded = await matcher.download_assets(match_result, temp_dir)
@@ -718,11 +718,11 @@ class TestVideoMatcher:
             suggested_output_name="Test",
             api_response={
                 "poster_url": "https://example.com/poster.jpg",
-                "fanart_url": "https://example.com/fanart.jpg"
-            }
+                "fanart_url": "https://example.com/fanart.jpg",
+            },
         )
 
-        with patch('taggrr.api.scraperr_client.ScraperAPIClient') as mock_client_class:
+        with patch("taggrr.api.scraperr_client.ScraperAPIClient") as mock_client_class:
             mock_client = AsyncMock()
             mock_client_class.return_value.__aenter__.return_value = mock_client
             # Poster succeeds, fanart fails
@@ -742,7 +742,7 @@ class TestVideoMatcher:
             confidence_breakdown=ConfidenceBreakdown(0.8, 0.8, 0.8, 0.8),
             source=SourceType.FC2,
             suggested_output_name="Test",
-            api_response={}  # No asset URLs
+            api_response={},  # No asset URLs
         )
 
         downloaded = await matcher.download_assets(match_result, temp_dir)
@@ -757,7 +757,7 @@ class TestVideoMatcher:
             confidence_breakdown=ConfidenceBreakdown(0.8, 0.8, 0.8, 0.8),
             source=SourceType.FC2,
             suggested_output_name="Test",
-            api_response=None
+            api_response=None,
         )
 
         downloaded = await matcher.download_assets(match_result, temp_dir)

@@ -10,6 +10,7 @@ from .models import SourceHint, SourceType, VideoFile
 @dataclass
 class AnalysisResult:
     """Result of name analysis."""
+
     primary_id: str | None
     alternative_ids: list[str]
     year: int | None
@@ -47,12 +48,14 @@ class ConfigurableIDExtractor:
             try:
                 regex = re.compile(pattern_config.regex, re.IGNORECASE)
                 source_type = self._get_source_type(pattern_config.source)
-                compiled.append((
-                    regex,
-                    pattern_config.format,
-                    source_type,
-                    pattern_config.confidence
-                ))
+                compiled.append(
+                    (
+                        regex,
+                        pattern_config.format,
+                        source_type,
+                        pattern_config.confidence,
+                    )
+                )
             except re.error as e:
                 print(f"Invalid regex pattern '{pattern_config.regex}': {e}")
                 continue
@@ -130,7 +133,9 @@ class ConfigurableSourceDetector:
                     # Convert glob pattern to regex
                     regex_pattern = pattern_str.replace("*", ".*")
                     regex = re.compile(regex_pattern, re.IGNORECASE)
-                    patterns.append((regex, f"folder:{pattern_str}", source_config.confidence_boost))
+                    patterns.append(
+                        (regex, f"folder:{pattern_str}", source_config.confidence_boost)
+                    )
                 except re.error as e:
                     print(f"Invalid folder pattern '{pattern_str}': {e}")
                     continue
@@ -141,7 +146,9 @@ class ConfigurableSourceDetector:
                     # Convert glob pattern to regex
                     regex_pattern = pattern_str.replace("*", ".*")
                     regex = re.compile(regex_pattern, re.IGNORECASE)
-                    patterns.append((regex, f"file:{pattern_str}", source_config.confidence_boost))
+                    patterns.append(
+                        (regex, f"file:{pattern_str}", source_config.confidence_boost)
+                    )
                 except re.error as e:
                     print(f"Invalid file pattern '{pattern_str}': {e}")
                     continue
@@ -167,7 +174,7 @@ class ConfigurableSourceDetector:
                     hint = SourceHint(
                         source_type=source_type,
                         pattern_matched=matched_text,
-                        confidence_boost=boost
+                        confidence_boost=boost,
                     )
                     hints.append(hint)
 
@@ -248,13 +255,14 @@ class ConfigurableNameAnalyzer:
         )
 
         # Calculate final confidence
-        combined_confidence = (folder_confidence * self.folder_weight +
-                             file_confidence * self.file_weight)
+        combined_confidence = (
+            folder_confidence * self.folder_weight + file_confidence * self.file_weight
+        )
 
         confidence_scores = {
             "folder": folder_confidence,
             "filename": file_confidence,
-            "combined": combined_confidence
+            "combined": combined_confidence,
         }
 
         return AnalysisResult(
@@ -265,11 +273,12 @@ class ConfigurableNameAnalyzer:
             confidence_scores=confidence_scores,
             extraction_source=extraction_source,
             raw_folder=folder_name,
-            raw_filename=file_name
+            raw_filename=file_name,
         )
 
-    def _calculate_confidence(self, ids: list[tuple[str, SourceType, float]],
-                            sources: list[SourceHint]) -> float:
+    def _calculate_confidence(
+        self, ids: list[tuple[str, SourceType, float]], sources: list[SourceHint]
+    ) -> float:
         """Calculate confidence score for a set of IDs and sources."""
         if not ids:
             return 0.0
@@ -282,8 +291,9 @@ class ConfigurableNameAnalyzer:
 
         return min(1.0, base_confidence + source_boost)
 
-    def _sources_agree(self, folder_sources: list[SourceHint],
-                      file_sources: list[SourceHint]) -> bool:
+    def _sources_agree(
+        self, folder_sources: list[SourceHint], file_sources: list[SourceHint]
+    ) -> bool:
         """Check if folder and file sources agree."""
         if not folder_sources or not file_sources:
             return False
@@ -293,8 +303,13 @@ class ConfigurableNameAnalyzer:
 
         return bool(folder_types & file_types)  # Any overlap
 
-    def _apply_global_preference(self, folder_ids: list[tuple], file_ids: list[tuple],
-                               folder_conf: float, file_conf: float) -> tuple[float, float]:
+    def _apply_global_preference(
+        self,
+        folder_ids: list[tuple],
+        file_ids: list[tuple],
+        folder_conf: float,
+        file_conf: float,
+    ) -> tuple[float, float]:
         """Apply global source preference boost."""
         pref = self.config.source_detection.global_preference.lower()
         pref_source = self._get_source_type(pref)
@@ -320,9 +335,13 @@ class ConfigurableNameAnalyzer:
         }
         return source_map.get(source_str, SourceType.GENERIC)
 
-    def _select_primary_id(self, folder_ids: list[tuple[str, SourceType, float]],
-                          file_ids: list[tuple[str, SourceType, float]],
-                          folder_conf: float, file_conf: float) -> tuple[str | None, str, list[str]]:
+    def _select_primary_id(
+        self,
+        folder_ids: list[tuple[str, SourceType, float]],
+        file_ids: list[tuple[str, SourceType, float]],
+        folder_conf: float,
+        file_conf: float,
+    ) -> tuple[str | None, str, list[str]]:
         """Select primary ID based on confidence and weights."""
         all_ids = []
 

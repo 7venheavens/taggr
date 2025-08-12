@@ -16,13 +16,13 @@ class TestFC2ShortNaming:
         # Create FC2 match result with long Japanese title
         match_result = MatchResult(
             video_metadata={
-                'title': 'Very Long Japanese Title That Would Cause Windows Path Issues テストタイトル',
-                'year': 2024
+                "title": "Very Long Japanese Title That Would Cause Windows Path Issues テストタイトル",
+                "year": 2024,
             },
             confidence_breakdown=ConfidenceBreakdown(0.8, 0.8, 0.8, 0.8),
             source=SourceType.FC2,
-            suggested_output_name='Long Title',
-            video_id='4734497'
+            suggested_output_name="Long Title",
+            video_id="4734497",
         )
 
         folder_name = formatter.format_folder_name(match_result)
@@ -39,16 +39,16 @@ class TestFC2ShortNaming:
 
         match_result = MatchResult(
             video_metadata={
-                'title': 'Another Very Long Japanese Title テストタイトル２',
-                'year': 2023
+                "title": "Another Very Long Japanese Title テストタイトル２",
+                "year": 2023,
             },
             confidence_breakdown=ConfidenceBreakdown(0.8, 0.8, 0.8, 0.8),
             source=SourceType.FC2,
-            suggested_output_name='Long Title',
-            video_id='1234567'
+            suggested_output_name="Long Title",
+            video_id="1234567",
         )
 
-        file_name = formatter.format_file_name(match_result, None, '.mp4')
+        file_name = formatter.format_file_name(match_result, None, ".mp4")
 
         # Should use short FC2 code
         assert file_name == "FC2-PPV-1234567 (2023).mp4"
@@ -62,16 +62,16 @@ class TestFC2ShortNaming:
 
         match_result = MatchResult(
             video_metadata={
-                'title': 'Long Multi-Part Japanese Title テストシリーズ',
-                'year': 2024
+                "title": "Long Multi-Part Japanese Title テストシリーズ",
+                "year": 2024,
             },
             confidence_breakdown=ConfidenceBreakdown(0.8, 0.8, 0.8, 0.8),
             source=SourceType.FC2,
-            suggested_output_name='Long Title',
-            video_id='9999999'
+            suggested_output_name="Long Title",
+            video_id="9999999",
         )
 
-        file_name = formatter.format_file_name(match_result, "Part 1", '.mkv')
+        file_name = formatter.format_file_name(match_result, "Part 1", ".mkv")
 
         # Should use short FC2 code with part info
         assert file_name == "FC2-PPV-9999999 (2024) - Part 1.mkv"
@@ -84,12 +84,12 @@ class TestFC2ShortNaming:
 
         match_result = MatchResult(
             video_metadata={
-                'title': 'Long Title Without Year 年なしタイトル',
+                "title": "Long Title Without Year 年なしタイトル",
             },
             confidence_breakdown=ConfidenceBreakdown(0.8, 0.8, 0.8, 0.8),
             source=SourceType.FC2,
-            suggested_output_name='Long Title',
-            video_id='5555555'
+            suggested_output_name="Long Title",
+            video_id="5555555",
         )
 
         folder_name = formatter.format_folder_name(match_result)
@@ -105,14 +105,11 @@ class TestFC2ShortNaming:
 
         # DMM video should keep original title
         dmm_result = MatchResult(
-            video_metadata={
-                'title': 'DMM Movie Title',
-                'year': 2024
-            },
+            video_metadata={"title": "DMM Movie Title", "year": 2024},
             confidence_breakdown=ConfidenceBreakdown(0.8, 0.8, 0.8, 0.8),
             source=SourceType.DMM,
-            suggested_output_name='DMM Movie Title',
-            video_id='MIDE-123'
+            suggested_output_name="DMM Movie Title",
+            video_id="MIDE-123",
         )
 
         folder_name = formatter.format_folder_name(dmm_result)
@@ -127,14 +124,11 @@ class TestFC2ShortNaming:
         formatter = PlexFormatter(config)
 
         match_result = MatchResult(
-            video_metadata={
-                'title': 'FC2 With Non-Numeric ID',
-                'year': 2024
-            },
+            video_metadata={"title": "FC2 With Non-Numeric ID", "year": 2024},
             confidence_breakdown=ConfidenceBreakdown(0.8, 0.8, 0.8, 0.8),
             source=SourceType.FC2,
-            suggested_output_name='FC2 With Non-Numeric ID',
-            video_id='not-numeric'  # Non-numeric ID
+            suggested_output_name="FC2 With Non-Numeric ID",
+            video_id="not-numeric",  # Non-numeric ID
         )
 
         folder_name = formatter.format_folder_name(match_result)

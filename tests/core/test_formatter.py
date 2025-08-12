@@ -32,7 +32,7 @@ class TestPlexFormatter:
             confidence_breakdown=ConfidenceBreakdown(0.8, 0.8, 0.8, 0.8),
             source=SourceType.GENERIC,
             suggested_output_name="Movie Without Year",
-            video_id="test"
+            video_id="test",
         )
 
         folder_name = formatter.format_folder_name(match_result)
@@ -61,7 +61,7 @@ class TestPlexFormatter:
         test_cases = [
             ("Movie<>Title", "Movie__Title"),
             ("Title:With|Invalid?Chars", "Title_With_Invalid_Chars"),
-            ("Title\"With/Quotes\\", "Title_With_Quotes_"),
+            ('Title"With/Quotes\\', "Title_With_Quotes_"),
             ("   Leading/Trailing Spaces   ", "Leading_Trailing Spaces"),
             ("Title.", "Title"),  # Trailing dot removal
         ]
@@ -123,29 +123,41 @@ class TestNFOGenerator:
             video_metadata={
                 "title": "Complete Movie",
                 "year": 2024,
-                "description": "A movie with all metadata",
+                "description": "A movie with all metadata",  # Should be ignored
                 "director": "Test Director",
                 "duration": 7200,  # 2 hours in seconds
                 "genres": ["Action", "Drama"],
                 "rating": 8.5,
                 "studio": "Test Studio",
-                "id": "test-123"
+                "id": "test-123",
+                "creator": "Test Creator",
+                "tags": ["tag1", "tag2", ""],  # Empty tag should be filtered out
+                "thumbnail_url": "http://example.com/thumb.jpg",
             },
             confidence_breakdown=ConfidenceBreakdown(0.8, 0.8, 0.8, 0.8),
             source=SourceType.GENERIC,
             suggested_output_name="Complete Movie (2024)",
-            video_id="test-123"
+            video_id="test-123",
         )
 
         generator = NFOGenerator(test_config)
         nfo_content = generator.generate_movie_nfo(match_result)
 
+        # Verify expected fields are present
         assert "<director>Test Director</director>" in nfo_content
         assert "<runtime>120</runtime>" in nfo_content  # Converted to minutes
         assert "<genre>Action</genre>" in nfo_content
         assert "<genre>Drama</genre>" in nfo_content
         assert "<rating>8.5</rating>" in nfo_content
         assert "<studio>Test Studio</studio>" in nfo_content
+        assert "<name>Test Creator</name>" in nfo_content  # Creator as actor
+        assert "<tag>tag1</tag>" in nfo_content
+        assert "<tag>tag2</tag>" in nfo_content
+        assert '<thumb aspect="poster">thumb.jpg</thumb>' in nfo_content
+
+        # Verify description/plot is NOT present
+        assert "<plot>" not in nfo_content
+        assert "A movie with all metadata" not in nfo_content
 
     def test_escape_xml_characters(self, test_config):
         """Test XML character escaping."""
@@ -176,14 +188,11 @@ class TestOutputPlanner:
             folder_name="source_folder",
             file_name="source.mp4",
             detected_parts=[],
-            source_hints=[]
+            source_hints=[],
         )
 
         video_group = VideoGroup(
-            files=[video_file],
-            group_name="source",
-            total_parts=1,
-            folder_path=temp_dir
+            files=[video_file], group_name="source", total_parts=1, folder_path=temp_dir
         )
 
         output_dir = temp_dir / "output"
@@ -210,11 +219,12 @@ class TestOutputPlanner:
             file_path.touch()
 
             from taggrr.core.models import PartInfo
+
             part_info = PartInfo(
                 part_number=i,
                 part_pattern=f"Part {i}",
                 confidence=0.9,
-                file_path=file_path
+                file_path=file_path,
             )
 
             video_file = VideoFile(
@@ -222,7 +232,7 @@ class TestOutputPlanner:
                 folder_name="source_folder",
                 file_name=f"source_part_{i}.mkv",
                 detected_parts=[part_info],
-                source_hints=[]
+                source_hints=[],
             )
             video_files.append(video_file)
 
@@ -230,7 +240,7 @@ class TestOutputPlanner:
             files=video_files,
             group_name="source series",
             total_parts=2,
-            folder_path=temp_dir
+            folder_path=temp_dir,
         )
 
         output_dir = temp_dir / "output"
@@ -257,14 +267,11 @@ class TestOutputPlanner:
             folder_name="source_folder",
             file_name="source.mp4",
             detected_parts=[],
-            source_hints=[]
+            source_hints=[],
         )
 
         video_group = VideoGroup(
-            files=[video_file],
-            group_name="source",
-            total_parts=1,
-            folder_path=temp_dir
+            files=[video_file], group_name="source", total_parts=1, folder_path=temp_dir
         )
 
         # Update match result with API response for assets
@@ -293,7 +300,7 @@ class TestOutputPlanner:
                 "file2": {"target_path": temp_dir / "output" / "file2.mp4"},
             },
             "folder_name": "Valid Folder Name",
-            "total_files": 2
+            "total_files": 2,
         }
 
         is_valid, issues = planner.validate_output_plan(valid_plan)
@@ -305,7 +312,7 @@ class TestOutputPlanner:
             "output_folder": Path("A" * 300),
             "structure": {},
             "folder_name": "Valid Name",
-            "total_files": 0
+            "total_files": 0,
         }
 
         is_valid, issues = planner.validate_output_plan(invalid_plan)
@@ -323,8 +330,8 @@ class TestOutputPlanner:
                 "file1": {"action": "copy"},
                 "file2": {"action": "copy"},
                 "_nfo": {"action": "create"},
-                "_poster": {"action": "download"}
-            }
+                "_poster": {"action": "download"},
+            },
         }
 
         summary = planner.get_plan_summary(plan)

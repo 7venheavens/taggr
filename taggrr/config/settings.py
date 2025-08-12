@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 class PatternConfig(BaseModel):
     """Configuration for a regex pattern."""
+
     regex: str
     format: str
     confidence: float = Field(ge=0.0, le=1.0)
@@ -16,6 +17,7 @@ class PatternConfig(BaseModel):
 
 class SourcePatternConfig(BaseModel):
     """Source detection patterns for a specific source."""
+
     folder: list[str] = Field(default_factory=list)
     file: list[str] = Field(default_factory=list)
     confidence_boost: float = Field(default=0.1, ge=0.0, le=1.0)
@@ -23,6 +25,7 @@ class SourcePatternConfig(BaseModel):
 
 class NameAnalysisConfig(BaseModel):
     """Name analysis configuration."""
+
     folder_weight: float = Field(default=0.6, ge=0.0, le=1.0)
     file_weight: float = Field(default=0.4, ge=0.0, le=1.0)
     context_boost: float = Field(default=0.1, ge=0.0, le=1.0)
@@ -30,6 +33,7 @@ class NameAnalysisConfig(BaseModel):
 
 class ConfidenceThresholdsConfig(BaseModel):
     """Confidence threshold settings."""
+
     auto_process: float = Field(default=85.0, ge=0.0, le=100.0)
     manual_review: float = Field(default=40.0, ge=0.0, le=100.0)
     skip_threshold: float = Field(default=20.0, ge=0.0, le=100.0)
@@ -37,57 +41,108 @@ class ConfidenceThresholdsConfig(BaseModel):
 
 class PartDetectionConfig(BaseModel):
     """Multi-part detection configuration."""
-    patterns: list[PatternConfig] = Field(default_factory=lambda: [
-        PatternConfig(regex=r"(?i)part\s*(\d+)", format="Part {n}", confidence=0.9),
-        PatternConfig(regex=r"(?i)cd\s*(\d+)", format="CD{n}", confidence=0.9),
-        PatternConfig(regex=r"(?i)disc\s*(\d+)", format="Disc {n}", confidence=0.9),
-        PatternConfig(regex=r"(?i)-(\d+)(?=\.\w+$)", format="Part {n}", confidence=0.8),
-        PatternConfig(regex=r"(?i)_(\d+)(?=\.\w+$)", format="Part {n}", confidence=0.8),
-        PatternConfig(regex=r"(?i)\[(\d+)\]", format="Part {n}", confidence=0.7),
-        PatternConfig(regex=r"(?i)\((\d+)\)", format="Part {n}", confidence=0.7),
-    ])
+
+    patterns: list[PatternConfig] = Field(
+        default_factory=lambda: [
+            PatternConfig(regex=r"(?i)part\s*(\d+)", format="Part {n}", confidence=0.9),
+            PatternConfig(regex=r"(?i)cd\s*(\d+)", format="CD{n}", confidence=0.9),
+            PatternConfig(regex=r"(?i)disc\s*(\d+)", format="Disc {n}", confidence=0.9),
+            PatternConfig(
+                regex=r"(?i)-(\d+)(?=\.\w+$)", format="Part {n}", confidence=0.8
+            ),
+            PatternConfig(
+                regex=r"(?i)_(\d+)(?=\.\w+$)", format="Part {n}", confidence=0.8
+            ),
+            PatternConfig(regex=r"(?i)\[(\d+)\]", format="Part {n}", confidence=0.7),
+            PatternConfig(regex=r"(?i)\((\d+)\)", format="Part {n}", confidence=0.7),
+        ]
+    )
     max_parts: int = Field(default=10, ge=1, le=50)
     similarity_threshold: float = Field(default=0.8, ge=0.0, le=1.0)
 
 
 class IDExtractionConfig(BaseModel):
     """ID extraction pattern configuration."""
-    strong_patterns: list[PatternConfig] = Field(default_factory=lambda: [
-        PatternConfig(regex=r"FC2-PPV-(\d{6,8})", format="FC2-PPV-{}", confidence=0.95, source="fc2"),
-        PatternConfig(regex=r"fc2-ppv-(\d{6,8})", format="FC2-PPV-{}", confidence=0.95, source="fc2"),
-        PatternConfig(regex=r"FC2PPV-(\d{6,8})", format="FC2-PPV-{}", confidence=0.90, source="fc2"),
-        PatternConfig(regex=r"ppv-(\d{6,8})", format="FC2-PPV-{}", confidence=0.80, source="fc2"),
-    ])
-    medium_patterns: list[PatternConfig] = Field(default_factory=lambda: [
-        PatternConfig(regex=r"([A-Z]{2,5}-\d{3,4})", format="{}", confidence=0.75, source="dmm"),
-        PatternConfig(regex=r"([A-Z]{3,5}\d{3,4})", format="{}", confidence=0.65, source="dmm"),
-        PatternConfig(regex=r"(\d{6}_\d{3})", format="{}", confidence=0.70, source="dmm"),
-    ])
-    weak_patterns: list[PatternConfig] = Field(default_factory=lambda: [
-        PatternConfig(regex=r"(\d{6,8})", format="{}", confidence=0.40, source="generic"),
-        PatternConfig(regex=r"([A-Z]+\d+)", format="{}", confidence=0.50, source="generic"),
-    ])
+
+    strong_patterns: list[PatternConfig] = Field(
+        default_factory=lambda: [
+            PatternConfig(
+                regex=r"FC2-PPV-(\d{6,8})",
+                format="FC2-PPV-{}",
+                confidence=0.95,
+                source="fc2",
+            ),
+            PatternConfig(
+                regex=r"fc2-ppv-(\d{6,8})",
+                format="FC2-PPV-{}",
+                confidence=0.95,
+                source="fc2",
+            ),
+            PatternConfig(
+                regex=r"FC2PPV-(\d{6,8})",
+                format="FC2-PPV-{}",
+                confidence=0.90,
+                source="fc2",
+            ),
+            PatternConfig(
+                regex=r"ppv-(\d{6,8})",
+                format="FC2-PPV-{}",
+                confidence=0.80,
+                source="fc2",
+            ),
+        ]
+    )
+    medium_patterns: list[PatternConfig] = Field(
+        default_factory=lambda: [
+            PatternConfig(
+                regex=r"([A-Z]{2,5}-\d{3,4})",
+                format="{}",
+                confidence=0.75,
+                source="dmm",
+            ),
+            PatternConfig(
+                regex=r"([A-Z]{3,5}\d{3,4})", format="{}", confidence=0.65, source="dmm"
+            ),
+            PatternConfig(
+                regex=r"(\d{6}_\d{3})", format="{}", confidence=0.70, source="dmm"
+            ),
+        ]
+    )
+    weak_patterns: list[PatternConfig] = Field(
+        default_factory=lambda: [
+            PatternConfig(
+                regex=r"(\d{6,8})", format="{}", confidence=0.40, source="generic"
+            ),
+            PatternConfig(
+                regex=r"([A-Z]+\d+)", format="{}", confidence=0.50, source="generic"
+            ),
+        ]
+    )
 
 
 class SourceDetectionConfig(BaseModel):
     """Source detection configuration."""
+
     global_preference: str | None = None
-    patterns: dict[str, SourcePatternConfig] = Field(default_factory=lambda: {
-        "fc2": SourcePatternConfig(
-            folder=["*FC2*", "*fc2*", "*PPV*", "*ppv*"],
-            file=["FC2-*", "fc2_*", "*ppv*", "*PPV*"],
-            confidence_boost=0.2
-        ),
-        "dmm": SourcePatternConfig(
-            folder=["*DMM*", "*R18*", "*dmm*", "*r18*"],
-            file=["*-h.mp4", "*uncensored*", "*DMM*"],
-            confidence_boost=0.15
-        )
-    })
+    patterns: dict[str, SourcePatternConfig] = Field(
+        default_factory=lambda: {
+            "fc2": SourcePatternConfig(
+                folder=["*FC2*", "*fc2*", "*PPV*", "*ppv*"],
+                file=["FC2-*", "fc2_*", "*ppv*", "*PPV*"],
+                confidence_boost=0.2,
+            ),
+            "dmm": SourcePatternConfig(
+                folder=["*DMM*", "*R18*", "*dmm*", "*r18*"],
+                file=["*-h.mp4", "*uncensored*", "*DMM*"],
+                confidence_boost=0.15,
+            ),
+        }
+    )
 
 
 class PlexOutputConfig(BaseModel):
     """Plex output configuration."""
+
     folder_format: str = "{title} ({year})"
     file_format: str = "{title} ({year}) - {part}"
     single_file_format: str = "{title} ({year})"
@@ -98,6 +153,7 @@ class PlexOutputConfig(BaseModel):
 
 class APIConfig(BaseModel):
     """API configuration."""
+
     base_url: str = "http://localhost:8000"
     timeout: int = 30
     retries: int = 3
@@ -106,15 +162,21 @@ class APIConfig(BaseModel):
 
 class MatchingConfig(BaseModel):
     """Matching configuration container."""
+
     name_analysis: NameAnalysisConfig = Field(default_factory=NameAnalysisConfig)
-    confidence_thresholds: ConfidenceThresholdsConfig = Field(default_factory=ConfidenceThresholdsConfig)
+    confidence_thresholds: ConfidenceThresholdsConfig = Field(
+        default_factory=ConfidenceThresholdsConfig
+    )
 
 
 class TaggerrConfig(BaseModel):
     """Main Taggerr configuration."""
+
     matching: MatchingConfig = Field(default_factory=MatchingConfig)
 
-    source_detection: SourceDetectionConfig = Field(default_factory=SourceDetectionConfig)
+    source_detection: SourceDetectionConfig = Field(
+        default_factory=SourceDetectionConfig
+    )
     multi_part: PartDetectionConfig = Field(default_factory=PartDetectionConfig)
     id_extraction: IDExtractionConfig = Field(default_factory=IDExtractionConfig)
     plex_output: PlexOutputConfig = Field(default_factory=PlexOutputConfig)
@@ -122,9 +184,20 @@ class TaggerrConfig(BaseModel):
 
     # File processing
     processing_mode: str = Field(default="inplace", pattern="^(inplace|hardlink|copy)$")
-    video_extensions: list[str] = Field(default_factory=lambda: [
-        ".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm", ".m4v", ".mpg", ".mpeg"
-    ])
+    video_extensions: list[str] = Field(
+        default_factory=lambda: [
+            ".mp4",
+            ".mkv",
+            ".avi",
+            ".mov",
+            ".wmv",
+            ".flv",
+            ".webm",
+            ".m4v",
+            ".mpg",
+            ".mpeg",
+        ]
+    )
 
     # Logging
     log_level: str = "INFO"
@@ -145,7 +218,7 @@ class ConfigManager:
         """Load configuration from file or create default."""
         if self.config_path.exists():
             try:
-                with open(self.config_path, encoding='utf-8') as f:
+                with open(self.config_path, encoding="utf-8") as f:
                     data = yaml.safe_load(f)
                     self._config = TaggerrConfig(**data)
             except Exception as e:
@@ -171,7 +244,7 @@ class ConfigManager:
 
         # Convert to dict and save as YAML
         data = config_to_save.model_dump()
-        with open(self.config_path, 'w', encoding='utf-8') as f:
+        with open(self.config_path, "w", encoding="utf-8") as f:
             yaml.dump(data, f, default_flow_style=False, indent=2)
 
         print(f"Configuration saved to {self.config_path}")
@@ -308,7 +381,7 @@ log_file: null  # Set to file path for file logging
 """
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(output_path, 'w', encoding='utf-8') as f:
+        with open(output_path, "w", encoding="utf-8") as f:
             f.write(sample_yaml)
 
         print(f"Sample configuration created at {output_path}")

@@ -1,6 +1,5 @@
 """Test video file scanning functionality."""
 
-
 from taggrr.core.models import VideoFile
 from taggrr.core.scanner import PartDetector, VideoScanner
 
@@ -55,7 +54,7 @@ class TestPartDetector:
                 folder_name=temp_dir.name,
                 file_name=file_path.name,
                 detected_parts=parts,
-                source_hints=[]
+                source_hints=[],
             )
             files.append(video_file)
 

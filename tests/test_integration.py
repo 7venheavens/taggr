@@ -46,7 +46,9 @@ class TestEndToEndProcessing:
             assert len(video_groups) >= 2
 
             # Mock API calls to avoid needing actual server
-            with patch('taggrr.api.scraperr_client.ScraperAPIClient') as mock_client_class:
+            with patch(
+                "taggrr.api.scraperr_client.ScraperAPIClient"
+            ) as mock_client_class:
                 mock_client = AsyncMock()
                 mock_client_class.return_value.__aenter__.return_value = mock_client
 
@@ -65,7 +67,7 @@ class TestEndToEndProcessing:
                             "year": 2024,
                             "id": video_id,
                             "description": "Test description",
-                            "poster_url": "https://example.com/poster.jpg"
+                            "poster_url": "https://example.com/poster.jpg",
                         }
                     return mock_response
 
@@ -75,7 +77,9 @@ class TestEndToEndProcessing:
                 results = []
                 for group in video_groups:
                     # Mock the async call
-                    with patch.object(processor, 'process_single_group') as mock_process:
+                    with patch.object(
+                        processor, "process_single_group"
+                    ) as mock_process:
                         # Create a result that simulates our FC2 short naming
                         from taggrr.core.models import (
                             ConfidenceBreakdown,
@@ -91,17 +95,19 @@ class TestEndToEndProcessing:
 
                         match_result = MatchResult(
                             video_metadata={"title": "FC2-PPV-4734497", "year": 2024},
-                            confidence_breakdown=ConfidenceBreakdown(0.8, 0.8, 0.8, 0.8),
+                            confidence_breakdown=ConfidenceBreakdown(
+                                0.8, 0.8, 0.8, 0.8
+                            ),
                             source=SourceType.FC2,
                             suggested_output_name="FC2-PPV-4734497",
-                            video_id="4734497"
+                            video_id="4734497",
                         )
 
                         result = ProcessingResult(
                             original_path=group.folder_path,
                             output_path=output_path,
                             match_result=match_result,
-                            status="success"
+                            status="success",
                         )
                         mock_process.return_value = result
                         results.append(result)
@@ -110,7 +116,11 @@ class TestEndToEndProcessing:
             assert len(results) >= 2
 
             # Check that FC2 videos have short output paths
-            fc2_results = [r for r in results if r.match_result and r.match_result.source == SourceType.FC2]
+            fc2_results = [
+                r
+                for r in results
+                if r.match_result and r.match_result.source == SourceType.FC2
+            ]
             assert len(fc2_results) >= 1
 
             for result in fc2_results:
@@ -130,7 +140,7 @@ class TestEndToEndProcessing:
                 "single_movie.mp4",
                 "series_part_1.mkv",
                 "series_part_2.mkv",
-                "FC2-PPV-1234567.mp4"
+                "FC2-PPV-1234567.mp4",
             ]
 
             # Create subdirectory structure
@@ -178,6 +188,7 @@ class TestEndToEndProcessing:
             video_files = scanner.scan_directory(temp_path)
 
             from taggrr.core.analyzer import NameAnalyzer
+
             analyzer = NameAnalyzer()
 
             # Analyze high confidence file
@@ -189,6 +200,12 @@ class TestEndToEndProcessing:
             low_analysis = analyzer.analyze(low_conf_file)
 
             # Verify confidence differences
-            assert high_analysis.confidence_scores["combined"] > low_analysis.confidence_scores["combined"]
+            assert (
+                high_analysis.confidence_scores["combined"]
+                > low_analysis.confidence_scores["combined"]
+            )
             assert high_analysis.primary_id == "1234567"
-            assert low_analysis.primary_id is None or low_analysis.confidence_scores["combined"] < 0.5
+            assert (
+                low_analysis.primary_id is None
+                or low_analysis.confidence_scores["combined"] < 0.5
+            )

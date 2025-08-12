@@ -9,6 +9,7 @@ from .models import SourceHint, SourceType, VideoFile
 @dataclass
 class AnalysisResult:
     """Result of name analysis."""
+
     primary_id: str | None
     alternative_ids: list[str]
     year: int | None
@@ -24,7 +25,12 @@ class IDExtractor:
 
     # Strong ID patterns with high confidence
     STRONG_PATTERNS = [
-        (r"FC2-PPV-(\d{6,8})", "{}", SourceType.FC2, 0.95),  # Extract just the number for FC2 API
+        (
+            r"FC2-PPV-(\d{6,8})",
+            "{}",
+            SourceType.FC2,
+            0.95,
+        ),  # Extract just the number for FC2 API
         (r"fc2-ppv-(\d{6,8})", "{}", SourceType.FC2, 0.95),
         (r"FC2PPV-(\d{6,8})", "{}", SourceType.FC2, 0.90),
         (r"ppv-(\d{6,8})", "{}", SourceType.FC2, 0.80),
@@ -33,24 +39,29 @@ class IDExtractor:
     # Medium confidence patterns
     MEDIUM_PATTERNS = [
         (r"([A-Z]{2,5}-\d{3,4})", "{}", SourceType.DMM, 0.75),  # MIDE-123, SSNI-456
-        (r"([A-Z]{3,5}\d{3,4})", "{}", SourceType.DMM, 0.65),   # MIDE123
-        (r"(\d{6}_\d{3})", "{}", SourceType.DMM, 0.70),         # 123456_001
+        (r"([A-Z]{3,5}\d{3,4})", "{}", SourceType.DMM, 0.65),  # MIDE123
+        (r"(\d{6}_\d{3})", "{}", SourceType.DMM, 0.70),  # 123456_001
     ]
 
     # Weak patterns - need source hints
     WEAK_PATTERNS = [
-        (r"(\d{6,8})", "{}", SourceType.GENERIC, 0.40),         # Plain numbers
-        (r"([A-Z]+\d+)", "{}", SourceType.GENERIC, 0.50),       # ABC123
+        (r"(\d{6,8})", "{}", SourceType.GENERIC, 0.40),  # Plain numbers
+        (r"([A-Z]+\d+)", "{}", SourceType.GENERIC, 0.50),  # ABC123
     ]
 
     def __init__(self):
         """Initialize with compiled patterns."""
-        self.strong_patterns = [(re.compile(p, re.IGNORECASE), f, s, c)
-                               for p, f, s, c in self.STRONG_PATTERNS]
-        self.medium_patterns = [(re.compile(p, re.IGNORECASE), f, s, c)
-                               for p, f, s, c in self.MEDIUM_PATTERNS]
-        self.weak_patterns = [(re.compile(p, re.IGNORECASE), f, s, c)
-                             for p, f, s, c in self.WEAK_PATTERNS]
+        self.strong_patterns = [
+            (re.compile(p, re.IGNORECASE), f, s, c)
+            for p, f, s, c in self.STRONG_PATTERNS
+        ]
+        self.medium_patterns = [
+            (re.compile(p, re.IGNORECASE), f, s, c)
+            for p, f, s, c in self.MEDIUM_PATTERNS
+        ]
+        self.weak_patterns = [
+            (re.compile(p, re.IGNORECASE), f, s, c) for p, f, s, c in self.WEAK_PATTERNS
+        ]
 
     def extract_ids(self, text: str) -> list[tuple[str, SourceType, float]]:
         """Extract all possible IDs from text with confidence scores."""
@@ -110,7 +121,7 @@ class SourceDetector:
             (r"R18[-_\s]", "R18", 0.15),
             (r"uncensored", "uncensored", 0.10),
             (r"-h\.mp4$", "-h.mp4", 0.15),
-        ]
+        ],
     }
 
     def __init__(self):
@@ -132,7 +143,7 @@ class SourceDetector:
                     hint = SourceHint(
                         source_type=source_type,
                         pattern_matched=matched_text,
-                        confidence_boost=boost
+                        confidence_boost=boost,
                     )
                     hints.append(hint)
 
@@ -159,8 +170,12 @@ class YearExtractor:
 class NameAnalyzer:
     """Main name analysis engine."""
 
-    def __init__(self, folder_weight: float = 0.6, file_weight: float = 0.4,
-                 context_boost: float = 0.1):
+    def __init__(
+        self,
+        folder_weight: float = 0.6,
+        file_weight: float = 0.4,
+        context_boost: float = 0.1,
+    ):
         """Initialize analyzer with configurable weights."""
         self.folder_weight = folder_weight
         self.file_weight = file_weight
@@ -204,13 +219,14 @@ class NameAnalyzer:
         )
 
         # Calculate final confidence
-        combined_confidence = (folder_confidence * self.folder_weight +
-                             file_confidence * self.file_weight)
+        combined_confidence = (
+            folder_confidence * self.folder_weight + file_confidence * self.file_weight
+        )
 
         confidence_scores = {
             "folder": folder_confidence,
             "filename": file_confidence,
-            "combined": combined_confidence
+            "combined": combined_confidence,
         }
 
         return AnalysisResult(
@@ -221,11 +237,12 @@ class NameAnalyzer:
             confidence_scores=confidence_scores,
             extraction_source=extraction_source,
             raw_folder=folder_name,
-            raw_filename=file_name
+            raw_filename=file_name,
         )
 
-    def _calculate_confidence(self, ids: list[tuple[str, SourceType, float]],
-                            sources: list[SourceHint]) -> float:
+    def _calculate_confidence(
+        self, ids: list[tuple[str, SourceType, float]], sources: list[SourceHint]
+    ) -> float:
         """Calculate confidence score for a set of IDs and sources."""
         if not ids:
             return 0.0
@@ -238,8 +255,9 @@ class NameAnalyzer:
 
         return min(1.0, base_confidence + source_boost)
 
-    def _sources_agree(self, folder_sources: list[SourceHint],
-                      file_sources: list[SourceHint]) -> bool:
+    def _sources_agree(
+        self, folder_sources: list[SourceHint], file_sources: list[SourceHint]
+    ) -> bool:
         """Check if folder and file sources agree."""
         if not folder_sources or not file_sources:
             return False
@@ -249,9 +267,13 @@ class NameAnalyzer:
 
         return bool(folder_types & file_types)  # Any overlap
 
-    def _select_primary_id(self, folder_ids: list[tuple[str, SourceType, float]],
-                          file_ids: list[tuple[str, SourceType, float]],
-                          folder_conf: float, file_conf: float) -> tuple[str | None, str, list[str]]:
+    def _select_primary_id(
+        self,
+        folder_ids: list[tuple[str, SourceType, float]],
+        file_ids: list[tuple[str, SourceType, float]],
+        folder_conf: float,
+        file_conf: float,
+    ) -> tuple[str | None, str, list[str]]:
         """Select primary ID based on confidence and weights."""
         all_ids = []
 

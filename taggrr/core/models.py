@@ -7,12 +7,14 @@ from pathlib import Path
 
 class ProcessingMode(Enum):
     """File processing modes."""
+
     INPLACE = "inplace"
     HARDLINK = "hardlink"
 
 
 class SourceType(Enum):
     """Video source types."""
+
     FC2 = "fc2"
     DMM = "dmm"
     GENERIC = "generic"
@@ -21,6 +23,7 @@ class SourceType(Enum):
 @dataclass
 class PartInfo:
     """Information about a video part."""
+
     part_number: int
     part_pattern: str  # "Part 1", "CD1", "Disc 2", etc.
     confidence: float
@@ -30,6 +33,7 @@ class PartInfo:
 @dataclass
 class SourceHint:
     """Source detection hint."""
+
     source_type: SourceType
     pattern_matched: str
     confidence_boost: float
@@ -38,6 +42,7 @@ class SourceHint:
 @dataclass
 class VideoFile:
     """Represents a video file with analysis metadata."""
+
     file_path: Path
     folder_name: str
     file_name: str
@@ -59,6 +64,7 @@ class VideoFile:
 @dataclass
 class VideoGroup:
     """Group of related video files (e.g., multi-part series)."""
+
     files: list[VideoFile]
     group_name: str
     total_parts: int
@@ -67,12 +73,16 @@ class VideoGroup:
     @property
     def primary_file(self) -> VideoFile:
         """Get the primary file for metadata lookup."""
-        return min(self.files, key=lambda f: f.detected_parts[0].part_number if f.detected_parts else 0)
+        return min(
+            self.files,
+            key=lambda f: f.detected_parts[0].part_number if f.detected_parts else 0,
+        )
 
 
 @dataclass
 class ConfidenceBreakdown:
     """Detailed confidence scoring."""
+
     folder_name_match: float
     file_name_match: float
     source_match: float
@@ -82,6 +92,7 @@ class ConfidenceBreakdown:
 @dataclass
 class MatchResult:
     """Result of matching a video against metadata APIs."""
+
     video_metadata: dict
     confidence_breakdown: ConfidenceBreakdown
     source: SourceType
@@ -93,6 +104,7 @@ class MatchResult:
 @dataclass
 class ProcessingResult:
     """Result of processing a video file or group."""
+
     original_path: Path
     output_path: Path | None
     match_result: MatchResult | None
@@ -104,6 +116,7 @@ class ProcessingResult:
 @dataclass
 class PlexMetadata:
     """Plex-compatible metadata structure."""
+
     title: str
     year: int | None
     poster_url: str | None = None

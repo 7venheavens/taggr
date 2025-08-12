@@ -24,52 +24,76 @@ class PlexFormatter:
 
         # Characters that need to be sanitized for file systems
         self.invalid_chars = re.compile(r'[<>:"/\\|?*]')
-        self.invalid_names = {'CON', 'PRN', 'AUX', 'NUL', 'COM1', 'COM2', 'COM3',
-                            'COM4', 'COM5', 'COM6', 'COM7', 'COM8', 'COM9',
-                            'LPT1', 'LPT2', 'LPT3', 'LPT4', 'LPT5', 'LPT6',
-                            'LPT7', 'LPT8', 'LPT9'}
+        self.invalid_names = {
+            "CON",
+            "PRN",
+            "AUX",
+            "NUL",
+            "COM1",
+            "COM2",
+            "COM3",
+            "COM4",
+            "COM5",
+            "COM6",
+            "COM7",
+            "COM8",
+            "COM9",
+            "LPT1",
+            "LPT2",
+            "LPT3",
+            "LPT4",
+            "LPT5",
+            "LPT6",
+            "LPT7",
+            "LPT8",
+            "LPT9",
+        }
 
     def format_folder_name(self, match_result: MatchResult) -> str:
         """Generate Plex-compatible folder name."""
-        title = match_result.video_metadata.get('title', 'Unknown Title')
-        year = match_result.video_metadata.get('year')
+        title = match_result.video_metadata.get("title", "Unknown Title")
+        year = match_result.video_metadata.get("year")
 
         # For FC2 content, use the video ID instead of long Japanese titles to avoid Windows path issues
-        if (match_result.source.name == 'FC2' and match_result.video_id and
-            match_result.video_id.isdigit()):
+        if (
+            match_result.source.name == "FC2"
+            and match_result.video_id
+            and match_result.video_id.isdigit()
+        ):
             title = f"FC2-PPV-{match_result.video_id}"
 
         # Use configured format
         if year:
-            folder_name = self.plex_config.folder_format.format(
-                title=title,
-                year=year
-            )
+            folder_name = self.plex_config.folder_format.format(title=title, year=year)
         else:
             # Fallback if no year available
             folder_name = title
 
         return self._sanitize_name(folder_name)
 
-    def format_file_name(self, match_result: MatchResult,
-                        part_info: str | None = None,
-                        file_extension: str = ".mp4") -> str:
+    def format_file_name(
+        self,
+        match_result: MatchResult,
+        part_info: str | None = None,
+        file_extension: str = ".mp4",
+    ) -> str:
         """Generate Plex-compatible file name."""
-        title = match_result.video_metadata.get('title', 'Unknown Title')
-        year = match_result.video_metadata.get('year')
+        title = match_result.video_metadata.get("title", "Unknown Title")
+        year = match_result.video_metadata.get("year")
 
         # For FC2 content, use the video ID instead of long Japanese titles to avoid Windows path issues
-        if (match_result.source.name == 'FC2' and match_result.video_id and
-            match_result.video_id.isdigit()):
+        if (
+            match_result.source.name == "FC2"
+            and match_result.video_id
+            and match_result.video_id.isdigit()
+        ):
             title = f"FC2-PPV-{match_result.video_id}"
 
         if part_info:
             # Multi-part file
             if year:
                 file_name = self.plex_config.file_format.format(
-                    title=title,
-                    year=year,
-                    part=part_info
+                    title=title, year=year, part=part_info
                 )
             else:
                 file_name = f"{title} - {part_info}"
@@ -77,8 +101,7 @@ class PlexFormatter:
             # Single file
             if year:
                 file_name = self.plex_config.single_file_format.format(
-                    title=title,
-                    year=year
+                    title=title, year=year
                 )
             else:
                 file_name = title
@@ -86,8 +109,9 @@ class PlexFormatter:
         sanitized_name = self._sanitize_name(file_name)
         return f"{sanitized_name}{file_extension}"
 
-    def format_group_structure(self, video_group: VideoGroup,
-                             match_result: MatchResult) -> dict[str, str]:
+    def format_group_structure(
+        self, video_group: VideoGroup, match_result: MatchResult
+    ) -> dict[str, str]:
         """Generate complete folder structure for a video group."""
         folder_name = self.format_folder_name(match_result)
 
@@ -104,7 +128,9 @@ class PlexFormatter:
             for video_file in video_group.files:
                 part_info = self._get_part_info(video_file)
                 file_extension = video_file.file_path.suffix
-                file_name = self.format_file_name(match_result, part_info, file_extension)
+                file_name = self.format_file_name(
+                    match_result, part_info, file_extension
+                )
                 structure[str(video_file.file_path)] = f"{folder_name}/{file_name}"
 
         return structure
@@ -118,13 +144,13 @@ class PlexFormatter:
     def _sanitize_name(self, name: str) -> str:
         """Sanitize name for file system compatibility."""
         # Remove/replace invalid characters
-        sanitized = self.invalid_chars.sub('_', name)
+        sanitized = self.invalid_chars.sub("_", name)
 
         # Remove leading/trailing whitespace and dots
-        sanitized = sanitized.strip(' .')
+        sanitized = sanitized.strip(" .")
 
         # Handle reserved Windows names
-        base_name = sanitized.split('.')[0].upper()
+        base_name = sanitized.split(".")[0].upper()
         if base_name in self.invalid_names:
             sanitized = f"_{sanitized}"
 
@@ -155,28 +181,29 @@ class NFOGenerator:
 
         nfo_content = []
         nfo_content.append('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>')
-        nfo_content.append('<movie>')
+        nfo_content.append("<movie>")
 
         # Basic metadata
-        if metadata.get('title'):
-            nfo_content.append(f'  <title>{self._escape_xml(metadata["title"])}</title>')
+        if metadata.get("title"):
+            nfo_content.append(
+                f"  <title>{self._escape_xml(metadata['title'])}</title>"
+            )
 
-        if metadata.get('year'):
-            nfo_content.append(f'  <year>{metadata["year"]}</year>')
+        if metadata.get("year"):
+            nfo_content.append(f"  <year>{metadata['year']}</year>")
 
-        if metadata.get('description'):
-            nfo_content.append(f'  <plot>{self._escape_xml(metadata["description"])}</plot>')
+        if metadata.get("director"):
+            nfo_content.append(
+                f"  <director>{self._escape_xml(metadata['director'])}</director>"
+            )
 
-        if metadata.get('director'):
-            nfo_content.append(f'  <director>{self._escape_xml(metadata["director"])}</director>')
-
-        if metadata.get('duration'):
+        if metadata.get("duration"):
             # Handle different duration formats
-            duration = metadata['duration']
-            if isinstance(duration, str) and ':' in duration:
+            duration = metadata["duration"]
+            if isinstance(duration, str) and ":" in duration:
                 # Parse "44:09" format to minutes
                 try:
-                    parts = duration.split(':')
+                    parts = duration.split(":")
                     if len(parts) == 2:
                         minutes = int(parts[0])
                         seconds = int(parts[1])
@@ -194,37 +221,58 @@ class NFOGenerator:
                     duration = duration // 60
 
             if duration:
-                nfo_content.append(f'  <runtime>{int(duration)}</runtime>')
+                nfo_content.append(f"  <runtime>{int(duration)}</runtime>")
 
         # Genres
-        if metadata.get('genres') and isinstance(metadata['genres'], list):
-            for genre in metadata['genres']:
-                nfo_content.append(f'  <genre>{self._escape_xml(genre)}</genre>')
+        if metadata.get("genres") and isinstance(metadata["genres"], list):
+            for genre in metadata["genres"]:
+                nfo_content.append(f"  <genre>{self._escape_xml(genre)}</genre>")
+
+        # Creator (as director/actor)
+        if metadata.get("creator") and metadata["creator"].strip():
+            nfo_content.append(f"  <actor>")
+            nfo_content.append(
+                f"    <name>{self._escape_xml(metadata['creator'])}</name>"
+            )
+            nfo_content.append(f"  </actor>")
+
+        # Tags
+        if metadata.get("tags") and isinstance(metadata["tags"], list):
+            for tag in metadata["tags"]:
+                if tag and str(tag).strip():  # Check for non-empty tags
+                    nfo_content.append(f"  <tag>{self._escape_xml(str(tag))}</tag>")
 
         # Rating (if available)
-        if metadata.get('rating'):
-            nfo_content.append(f'  <rating>{metadata["rating"]}</rating>')
+        if metadata.get("rating"):
+            nfo_content.append(f"  <rating>{metadata['rating']}</rating>")
 
         # Studio/Source
-        if metadata.get('studio'):
-            nfo_content.append(f'  <studio>{self._escape_xml(metadata["studio"])}</studio>')
+        if metadata.get("studio"):
+            nfo_content.append(
+                f"  <studio>{self._escape_xml(metadata['studio'])}</studio>"
+            )
 
         # Unique ID
-        if metadata.get('id'):
-            nfo_content.append(f'  <uniqueid type="scraperr">{metadata["id"]}</uniqueid>')
+        if metadata.get("id"):
+            nfo_content.append(
+                f'  <uniqueid type="scraperr">{metadata["id"]}</uniqueid>'
+            )
 
         # Poster and fanart
-        if metadata.get('poster_url'):
+        if metadata.get("poster_url"):
             nfo_content.append('  <thumb aspect="poster">poster.jpg</thumb>')
+        elif metadata.get("thumbnail_url") and metadata["thumbnail_url"].strip():
+            # Use thumbnail as poster if no dedicated poster
+            nfo_content.append('  <thumb aspect="poster">thumb.jpg</thumb>')
 
-        if metadata.get('fanart_url'):
-            nfo_content.append('  <fanart>')
-            nfo_content.append('    <thumb>fanart.jpg</thumb>')
-            nfo_content.append('  </fanart>')
+        if metadata.get("fanart_url"):
+            nfo_content.append("  <fanart>")
+            nfo_content.append("    <thumb>fanart.jpg</thumb>")
+            nfo_content.append("  </fanart>")
 
-        nfo_content.append('</movie>')
+        nfo_content.append("</movie>")
 
-        return '\n'.join(nfo_content)
+        return "\n".join(nfo_content)
 
     def _escape_xml(self, text: str) -> str:
         """Escape XML special characters."""
@@ -232,11 +280,11 @@ class NFOGenerator:
             text = str(text)
 
         replacements = {
-            '&': '&amp;',
-            '<': '&lt;',
-            '>': '&gt;',
-            '"': '&quot;',
-            "'": '&#39;'
+            "&": "&amp;",
+            "<": "&lt;",
+            ">": "&gt;",
+            '"': "&quot;",
+            "'": "&#39;",
         }
 
         for char, replacement in replacements.items():
@@ -248,15 +296,18 @@ class NFOGenerator:
 class OutputPlanner:
     """Plans the complete output structure for processed videos."""
 
-    def __init__(self, config: TaggerrConfig, processing_mode: ProcessingMode | None = None):
+    def __init__(
+        self, config: TaggerrConfig, processing_mode: ProcessingMode | None = None
+    ):
         """Initialize output planner with configuration."""
         self.config = config
         self.processing_mode = processing_mode or ProcessingMode.INPLACE
         self.formatter = PlexFormatter(config)
         self.nfo_generator = NFOGenerator(config)
 
-    def plan_output(self, video_group: VideoGroup, match_result: MatchResult,
-                   output_base_dir: Path) -> dict[str, any]:
+    def plan_output(
+        self, video_group: VideoGroup, match_result: MatchResult, output_base_dir: Path
+    ) -> dict[str, any]:
         """Plan complete output structure for a video group."""
         # Generate folder structure
         file_mapping = self.formatter.format_group_structure(video_group, match_result)
@@ -273,51 +324,71 @@ class OutputPlanner:
 
             # Determine action based on processing mode
             if self.processing_mode == ProcessingMode.HARDLINK:
-                action = 'hardlink'
+                action = "hardlink"
             elif self.processing_mode == ProcessingMode.INPLACE:
-                action = 'move'
+                action = "move"
             else:
-                action = 'copy'  # fallback
+                action = "copy"  # fallback
 
             output_structure[str(source)] = {
-                'target_path': target,
-                'relative_path': relative_path,
-                'action': action
+                "target_path": target,
+                "relative_path": relative_path,
+                "action": action,
             }
 
         # Plan NFO file creation
         nfo_content = self.nfo_generator.generate_movie_nfo(match_result)
         if nfo_content:
-            nfo_path = output_folder / 'movie.nfo'
-            output_structure['_nfo'] = {
-                'target_path': nfo_path,
-                'content': nfo_content,
-                'action': 'create'
+            nfo_path = output_folder / "movie.nfo"
+            output_structure["_nfo"] = {
+                "target_path": nfo_path,
+                "content": nfo_content,
+                "action": "create",
             }
 
         # Plan asset downloads
         if self.config.plex_output.download_assets:
-            if match_result.api_response and match_result.api_response.get('poster_url'):
-                poster_path = output_folder / 'poster.jpg'
-                output_structure['_poster'] = {
-                    'target_path': poster_path,
-                    'url': match_result.api_response['poster_url'],
-                    'action': 'download'
+            if match_result.api_response and match_result.api_response.get(
+                "poster_url"
+            ):
+                poster_path = output_folder / "poster.jpg"
+                output_structure["_poster"] = {
+                    "target_path": poster_path,
+                    "url": match_result.api_response["poster_url"],
+                    "action": "download",
                 }
 
-            if match_result.api_response and match_result.api_response.get('fanart_url'):
-                fanart_path = output_folder / 'fanart.jpg'
-                output_structure['_fanart'] = {
-                    'target_path': fanart_path,
-                    'url': match_result.api_response['fanart_url'],
-                    'action': 'download'
+            if match_result.api_response and match_result.api_response.get(
+                "fanart_url"
+            ):
+                fanart_path = output_folder / "fanart.jpg"
+                output_structure["_fanart"] = {
+                    "target_path": fanart_path,
+                    "url": match_result.api_response["fanart_url"],
+                    "action": "download",
+                }
+
+            # Download thumbnail if no poster available
+            if (
+                match_result.api_response
+                and match_result.api_response.get("thumbnail_url")
+                and match_result.api_response["thumbnail_url"].strip()
+                and not match_result.api_response.get("poster_url")
+            ):
+                thumb_path = output_folder / "thumb.jpg"
+                output_structure["_thumbnail"] = {
+                    "target_path": thumb_path,
+                    "url": match_result.api_response["thumbnail_url"],
+                    "action": "download",
                 }
 
         return {
-            'output_folder': output_folder,
-            'structure': output_structure,
-            'folder_name': folder_name,
-            'total_files': len([k for k in output_structure.keys() if not k.startswith('_')])
+            "output_folder": output_folder,
+            "structure": output_structure,
+            "folder_name": folder_name,
+            "total_files": len(
+                [k for k in output_structure.keys() if not k.startswith("_")]
+            ),
         }
 
     def validate_output_plan(self, plan: dict[str, any]) -> tuple[bool, list[str]]:
@@ -325,20 +396,20 @@ class OutputPlanner:
         issues = []
 
         # Check if output folder would be too deeply nested
-        output_folder = plan['output_folder']
+        output_folder = plan["output_folder"]
         if len(str(output_folder)) > 250:  # Conservative path length limit
             issues.append(f"Output path too long: {output_folder}")
 
         # Check for potential conflicts
         target_paths = set()
-        for item in plan['structure'].values():
-            target_path = str(item['target_path'])
+        for item in plan["structure"].values():
+            target_path = str(item["target_path"])
             if target_path in target_paths:
                 issues.append(f"Duplicate target path: {target_path}")
             target_paths.add(target_path)
 
         # Check for invalid characters in folder name
-        folder_name = plan['folder_name']
+        folder_name = plan["folder_name"]
         if any(char in folder_name for char in '<>:"/\\|?*'):
             issues.append(f"Invalid characters in folder name: {folder_name}")
 
@@ -346,35 +417,35 @@ class OutputPlanner:
 
     def get_plan_summary(self, plan: dict[str, any]) -> str:
         """Generate a human-readable summary of the output plan."""
-        folder_name = plan['folder_name']
-        total_files = plan['total_files']
+        folder_name = plan["folder_name"]
+        total_files = plan["total_files"]
 
         summary_parts = [
             f"Output folder: {folder_name}",
-            f"Files to process: {total_files}"
+            f"Files to process: {total_files}",
         ]
 
-        structure = plan['structure']
+        structure = plan["structure"]
 
         # Count different action types
         actions = {}
         for item in structure.values():
-            action = item['action']
+            action = item["action"]
             actions[action] = actions.get(action, 0) + 1
 
-        if actions.get('copy', 0) > 0:
+        if actions.get("copy", 0) > 0:
             summary_parts.append(f"Files to copy: {actions['copy']}")
 
-        if actions.get('move', 0) > 0:
+        if actions.get("move", 0) > 0:
             summary_parts.append(f"Files to move: {actions['move']}")
 
-        if actions.get('hardlink', 0) > 0:
+        if actions.get("hardlink", 0) > 0:
             summary_parts.append(f"Files to hardlink: {actions['hardlink']}")
 
-        if actions.get('create', 0) > 0:
+        if actions.get("create", 0) > 0:
             summary_parts.append(f"NFO files to create: {actions['create']}")
 
-        if actions.get('download', 0) > 0:
+        if actions.get("download", 0) > 0:
             summary_parts.append(f"Assets to download: {actions['download']}")
 
         return " | ".join(summary_parts)

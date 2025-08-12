@@ -16,20 +16,25 @@ logger = logging.getLogger(__name__)
 class VideoProcessor:
     """Main video processing pipeline coordinator."""
 
-    def __init__(self, config: TaggerrConfig, processing_mode: ProcessingMode | None = None):
+    def __init__(
+        self, config: TaggerrConfig, processing_mode: ProcessingMode | None = None
+    ):
         """Initialize processor with configuration."""
         self.config = config
         self.processing_mode = processing_mode or ProcessingMode.INPLACE
         self.analyzer = NameAnalyzer(
             folder_weight=config.matching.name_analysis.folder_weight,
             file_weight=config.matching.name_analysis.file_weight,
-            context_boost=config.matching.name_analysis.context_boost
+            context_boost=config.matching.name_analysis.context_boost,
         )
         self.matcher = VideoMatcher(config)
-        self.output_planner = OutputPlanner(config, processing_mode=self.processing_mode)
+        self.output_planner = OutputPlanner(
+            config, processing_mode=self.processing_mode
+        )
 
-    async def process_groups(self, video_groups: list[VideoGroup],
-                           output_dir: Path, dry_run: bool = False) -> list[ProcessingResult]:
+    async def process_groups(
+        self, video_groups: list[VideoGroup], output_dir: Path, dry_run: bool = False
+    ) -> list[ProcessingResult]:
         """Process all video groups through the complete pipeline."""
         results = []
 
@@ -42,55 +47,78 @@ class VideoProcessor:
 
                 # Log result
                 if result.status == "success":
-                    logger.info(f"[SUCCESS] Successfully processed: {result.original_path}")
+                    logger.info(
+                        f"[SUCCESS] Successfully processed: {result.original_path}"
+                    )
                 elif result.status == "review_needed":
-                    logger.warning(f"[REVIEW] Manual review needed: {result.original_path}")
+                    logger.warning(
+                        f"[REVIEW] Manual review needed: {result.original_path}"
+                    )
                 elif result.status == "skipped":
                     logger.info(f"[SKIPPED] Skipped: {result.original_path}")
                 else:
-                    logger.error(f"[FAILED] Failed: {result.original_path} - {result.error_message}")
+                    logger.error(
+                        f"[FAILED] Failed: {result.original_path} - {result.error_message}"
+                    )
 
             except Exception as e:
-                logger.error(f"Unexpected error processing group {group.group_name}: {e}", exc_info=True)
-                results.append(ProcessingResult(
-                    original_path=group.folder_path,
-                    output_path=None,
-                    match_result=None,
-                    status="failed",
-                    error_message=str(e)
-                ))
+                logger.error(
+                    f"Unexpected error processing group {group.group_name}: {e}",
+                    exc_info=True,
+                )
+                results.append(
+                    ProcessingResult(
+                        original_path=group.folder_path,
+                        output_path=None,
+                        match_result=None,
+                        status="failed",
+                        error_message=str(e),
+                    )
+                )
 
         return results
 
-    async def process_single_group(self, video_group: VideoGroup,
-                                 output_dir: Path, dry_run: bool = False) -> ProcessingResult:
+    async def process_single_group(
+        self, video_group: VideoGroup, output_dir: Path, dry_run: bool = False
+    ) -> ProcessingResult:
         """Process a single video group through the pipeline."""
         # Step 1: Analyze primary file for ID extraction
         primary_file = video_group.primary_file
         analysis = self.analyzer.analyze(primary_file)
 
-        logger.debug(f"Analysis result: ID={analysis.primary_id}, confidence={analysis.confidence_scores['combined']:.2f}")
+        logger.debug(
+            f"Analysis result: ID={analysis.primary_id}, confidence={analysis.confidence_scores['combined']:.2f}"
+        )
 
         # Step 2: Check confidence thresholds
-        combined_confidence = analysis.confidence_scores['combined'] * 100  # Convert to percentage
+        combined_confidence = (
+            analysis.confidence_scores["combined"] * 100
+        )  # Convert to percentage
 
-        if combined_confidence < self.config.matching.confidence_thresholds.skip_threshold:
+        if (
+            combined_confidence
+            < self.config.matching.confidence_thresholds.skip_threshold
+        ):
             return ProcessingResult(
                 original_path=video_group.folder_path,
                 output_path=None,
                 match_result=None,
                 status="skipped",
-                error_message=f"Confidence too low: {combined_confidence:.1f}%"
+                error_message=f"Confidence too low: {combined_confidence:.1f}%",
             )
 
-        if (combined_confidence < self.config.matching.confidence_thresholds.manual_review and
-            combined_confidence < self.config.matching.confidence_thresholds.auto_process):
+        if (
+            combined_confidence
+            < self.config.matching.confidence_thresholds.manual_review
+            and combined_confidence
+            < self.config.matching.confidence_thresholds.auto_process
+        ):
             return ProcessingResult(
                 original_path=video_group.folder_path,
                 output_path=None,
                 match_result=None,
                 status="review_needed",
-                error_message=f"Manual review required: {combined_confidence:.1f}%"
+                error_message=f"Manual review required: {combined_confidence:.1f}%",
             )
 
         # Step 3: Match against API if we have a good ID
@@ -105,9 +133,7 @@ class VideoProcessor:
 
             try:
                 match_result = await self.matcher.match_video(
-                    analysis.primary_id,
-                    analysis.alternative_ids,
-                    source_hint
+                    analysis.primary_id, analysis.alternative_ids, source_hint
                 )
             except Exception as e:
                 logger.warning(f"API search failed: {e}")
@@ -118,7 +144,9 @@ class VideoProcessor:
             match_result = self._create_fallback_match(analysis, video_group)
 
         # Step 5: Plan output structure
-        output_plan = self.output_planner.plan_output(video_group, match_result, output_dir)
+        output_plan = self.output_planner.plan_output(
+            video_group, match_result, output_dir
+        )
 
         # Step 6: Validate plan
         is_valid, issues = self.output_planner.validate_output_plan(output_plan)
@@ -128,20 +156,22 @@ class VideoProcessor:
                 output_path=None,
                 match_result=match_result,
                 status="failed",
-                error_message=f"Output validation failed: {'; '.join(issues)}"
+                error_message=f"Output validation failed: {'; '.join(issues)}",
             )
 
         # Step 7: Execute plan (if not dry run)
         if not dry_run:
             try:
-                assets_downloaded = await self._execute_output_plan(output_plan, match_result)
+                assets_downloaded = await self._execute_output_plan(
+                    output_plan, match_result
+                )
 
                 return ProcessingResult(
                     original_path=video_group.folder_path,
-                    output_path=output_plan['output_folder'],
+                    output_path=output_plan["output_folder"],
                     match_result=match_result,
                     status="success",
-                    assets_downloaded=assets_downloaded
+                    assets_downloaded=assets_downloaded,
                 )
             except Exception as e:
                 return ProcessingResult(
@@ -149,16 +179,16 @@ class VideoProcessor:
                     output_path=None,
                     match_result=match_result,
                     status="failed",
-                    error_message=f"Execution failed: {e}"
+                    error_message=f"Execution failed: {e}",
                 )
         else:
             # Dry run - just return the plan
             return ProcessingResult(
                 original_path=video_group.folder_path,
-                output_path=output_plan['output_folder'],
+                output_path=output_plan["output_folder"],
                 match_result=match_result,
                 status="success",
-                error_message="DRY RUN - No changes made"
+                error_message="DRY RUN - No changes made",
             )
 
     def _create_fallback_match(self, analysis, video_group: VideoGroup) -> MatchResult:
@@ -178,14 +208,16 @@ class VideoProcessor:
             "title": clean_title,
             "id": analysis.primary_id,
             "year": analysis.year,
-            "source": analysis.source_hints[0].source_type.value if analysis.source_hints else "unknown"
+            "source": analysis.source_hints[0].source_type.value
+            if analysis.source_hints
+            else "unknown",
         }
 
         confidence = ConfidenceBreakdown(
             folder_name_match=analysis.confidence_scores.get("folder", 0.0),
             file_name_match=analysis.confidence_scores.get("filename", 0.0),
             source_match=0.5,  # Moderate confidence for fallback
-            overall_confidence=analysis.confidence_scores.get("combined", 0.0)
+            overall_confidence=analysis.confidence_scores.get("combined", 0.0),
         )
 
         from ..core.models import SourceType
@@ -193,45 +225,48 @@ class VideoProcessor:
         return MatchResult(
             video_metadata=metadata,
             confidence_breakdown=confidence,
-            source=analysis.source_hints[0].source_type if analysis.source_hints else SourceType.GENERIC,
+            source=analysis.source_hints[0].source_type
+            if analysis.source_hints
+            else SourceType.GENERIC,
             suggested_output_name=clean_title,
-            video_id=analysis.primary_id
+            video_id=analysis.primary_id,
         )
 
-    async def _execute_output_plan(self, output_plan: dict[str, Any],
-                                 match_result: MatchResult) -> list[str]:
+    async def _execute_output_plan(
+        self, output_plan: dict[str, Any], match_result: MatchResult
+    ) -> list[str]:
         """Execute the output plan by moving, hardlinking, or copying files and creating assets."""
         import os
         import shutil
 
         assets_downloaded = []
-        output_folder = output_plan['output_folder']
+        output_folder = output_plan["output_folder"]
 
         # Create output directory
         output_folder.mkdir(parents=True, exist_ok=True)
         logger.info(f"Created output directory: {output_folder}")
 
         # Process each item in the structure
-        for key, item in output_plan['structure'].items():
-            target_path = item['target_path']
-            action = item['action']
+        for key, item in output_plan["structure"].items():
+            target_path = item["target_path"]
+            action = item["action"]
 
             try:
-                if action == 'copy':
+                if action == "copy":
                     # Copy video file
                     source_path = Path(key)
                     target_path.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(source_path, target_path)
                     logger.info(f"Copied: {source_path.name} -> {target_path.name}")
 
-                elif action == 'move':
+                elif action == "move":
                     # Move video file
                     source_path = Path(key)
                     target_path.parent.mkdir(parents=True, exist_ok=True)
                     shutil.move(str(source_path), str(target_path))
                     logger.info(f"Moved: {source_path.name} -> {target_path.name}")
 
-                elif action == 'hardlink':
+                elif action == "hardlink":
                     # Create hardlink to video file
                     source_path = Path(key)
                     target_path.parent.mkdir(parents=True, exist_ok=True)
@@ -241,19 +276,21 @@ class VideoProcessor:
                     os.link(str(source_path), str(target_path))
                     logger.info(f"Hardlinked: {source_path.name} -> {target_path.name}")
 
-                elif action == 'create':
+                elif action == "create":
                     # Create NFO file
-                    content = item['content']
+                    content = item["content"]
                     target_path.parent.mkdir(parents=True, exist_ok=True)
-                    with open(target_path, 'w', encoding='utf-8') as f:
+                    with open(target_path, "w", encoding="utf-8") as f:
                         f.write(content)
                     logger.info(f"Created: {target_path.name}")
                     assets_downloaded.append(target_path.name)
 
-                elif action == 'download':
+                elif action == "download":
                     # Download asset
-                    url = item['url']
-                    success = await self.matcher.download_assets(match_result, output_folder)
+                    url = item["url"]
+                    success = await self.matcher.download_assets(
+                        match_result, output_folder
+                    )
                     if success:
                         assets_downloaded.extend(success)
 
@@ -271,9 +308,15 @@ class VideoProcessor:
             "failed": len([r for r in results if r.status == "failed"]),
             "skipped": len([r for r in results if r.status == "skipped"]),
             "review_needed": len([r for r in results if r.status == "review_needed"]),
-            "total_assets": sum(len(r.assets_downloaded) for r in results if r.assets_downloaded)
+            "total_assets": sum(
+                len(r.assets_downloaded) for r in results if r.assets_downloaded
+            ),
         }
 
-        summary["success_rate"] = (summary["successful"] / summary["total_groups"] * 100) if summary["total_groups"] > 0 else 0
+        summary["success_rate"] = (
+            (summary["successful"] / summary["total_groups"] * 100)
+            if summary["total_groups"] > 0
+            else 0
+        )
 
         return summary

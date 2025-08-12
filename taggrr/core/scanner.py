@@ -23,8 +23,9 @@ class PartDetector:
     def __init__(self, patterns: list[tuple[str, str]] | None = None):
         """Initialize with custom patterns or defaults."""
         self.patterns = patterns or self.DEFAULT_PATTERNS
-        self.compiled_patterns = [(re.compile(pattern), format_str)
-                                for pattern, format_str in self.patterns]
+        self.compiled_patterns = [
+            (re.compile(pattern), format_str) for pattern, format_str in self.patterns
+        ]
 
     def detect_parts(self, file_path: Path) -> list[PartInfo]:
         """Detect part information from filename."""
@@ -49,7 +50,7 @@ class PartDetector:
                         part_number=part_num,
                         part_pattern=format_str.replace("{n}", str(part_num)),
                         confidence=confidence,
-                        file_path=file_path
+                        file_path=file_path,
                     )
                     parts.append(part_info)
                 except ValueError:
@@ -57,8 +58,9 @@ class PartDetector:
 
         return parts
 
-    def group_related_files(self, video_files: list[VideoFile],
-                          similarity_threshold: float = 0.8) -> list[VideoGroup]:
+    def group_related_files(
+        self, video_files: list[VideoFile], similarity_threshold: float = 0.8
+    ) -> list[VideoGroup]:
         """Group files that belong to the same multi-part series."""
         groups = []
         processed = set()
@@ -70,10 +72,18 @@ class PartDetector:
             group_files = [file1]
             processed.add(i)
 
+            # Extract video ID from the first file to ensure we don't mix different videos
+            file1_id = self._extract_video_id(file1.stem)
+
             # Find similar files that might be parts
-            for j, file2 in enumerate(video_files[i+1:], i+1):
+            for j, file2 in enumerate(video_files[i + 1 :], i + 1):
                 if j in processed:
                     continue
+
+                # First check if they have the same video ID - if different IDs, never group
+                file2_id = self._extract_video_id(file2.stem)
+                if file1_id and file2_id and file1_id != file2_id:
+                    continue  # Different video IDs, skip
 
                 similarity = self._calculate_similarity(file1.stem, file2.stem)
                 if similarity >= similarity_threshold:
@@ -92,7 +102,7 @@ class PartDetector:
                     files=sorted(group_files, key=self._get_part_number),
                     group_name=group_name,
                     total_parts=len(group_files),
-                    folder_path=group_files[0].file_path.parent
+                    folder_path=group_files[0].file_path.parent,
                 )
                 groups.append(group)
             else:
@@ -101,7 +111,7 @@ class PartDetector:
                     files=group_files,
                     group_name=file1.stem,
                     total_parts=1,
-                    folder_path=file1.file_path.parent
+                    folder_path=file1.file_path.parent,
                 )
                 groups.append(group)
 
@@ -140,7 +150,7 @@ class PartDetector:
         """Find longest common substring."""
         matcher = SequenceMatcher(None, s1, s2)
         match = matcher.find_longest_match()
-        return s1[match.a:match.a + match.size]
+        return s1[match.a : match.a + match.size]
 
     def _get_part_number(self, video_file: VideoFile) -> int:
         """Get part number for sorting, default to 1 if no parts detected."""
@@ -148,17 +158,59 @@ class PartDetector:
             return video_file.detected_parts[0].part_number
         return 1
 
+    def _extract_video_id(self, filename: str) -> str | None:
+        """Extract video ID from filename to prevent grouping different videos."""
+        # FC2-PPV patterns
+        fc2_patterns = [
+            r"FC2-PPV-(\d{6,8})",
+            r"fc2-ppv-(\d{6,8})",
+            r"FC2PPV-(\d{6,8})",
+            r"ppv-(\d{6,8})",
+        ]
+
+        for pattern in fc2_patterns:
+            match = re.search(pattern, filename, re.IGNORECASE)
+            if match:
+                return f"FC2-PPV-{match.group(1)}"
+
+        # DMM/JAV patterns
+        dmm_patterns = [
+            r"([A-Z]{2,5}-\d{3,4})",
+            r"([A-Z]{3,5}\d{3,4})",
+            r"(\d{6}_\d{3})",
+        ]
+
+        for pattern in dmm_patterns:
+            match = re.search(pattern, filename)
+            if match:
+                return match.group(1)
+
+        return None
+
 
 class VideoScanner:
     """Scans directories for video files and creates VideoFile objects."""
 
-    VIDEO_EXTENSIONS = {'.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.webm', '.m4v', '.mpg', '.mpeg'}
+    VIDEO_EXTENSIONS = {
+        ".mp4",
+        ".mkv",
+        ".avi",
+        ".mov",
+        ".wmv",
+        ".flv",
+        ".webm",
+        ".m4v",
+        ".mpg",
+        ".mpeg",
+    }
 
     def __init__(self, part_detector: PartDetector | None = None):
         """Initialize scanner with optional custom part detector."""
         self.part_detector = part_detector or PartDetector()
 
-    def scan_directory(self, directory: Path, recursive: bool = True) -> list[VideoFile]:
+    def scan_directory(
+        self, directory: Path, recursive: bool = True
+    ) -> list[VideoFile]:
         """Scan directory for video files."""
         video_files = []
 
@@ -178,8 +230,9 @@ class VideoScanner:
             all_files.extend(files)
         return all_files
 
-    def group_videos(self, video_files: list[VideoFile],
-                    similarity_threshold: float = 0.8) -> list[VideoGroup]:
+    def group_videos(
+        self, video_files: list[VideoFile], similarity_threshold: float = 0.8
+    ) -> list[VideoGroup]:
         """Group video files by similarity and part detection."""
         return self.part_detector.group_related_files(video_files, similarity_threshold)
 
@@ -205,5 +258,5 @@ class VideoScanner:
             file_name=file_name,
             detected_parts=detected_parts,
             source_hints=[],  # Will be populated by source detector
-            file_size=file_size
+            file_size=file_size,
         )
