@@ -1,8 +1,7 @@
 """Configuration management for Taggerr."""
 
-from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+
 import yaml
 from pydantic import BaseModel, Field
 
@@ -12,13 +11,13 @@ class PatternConfig(BaseModel):
     regex: str
     format: str
     confidence: float = Field(ge=0.0, le=1.0)
-    source: Optional[str] = None
+    source: str | None = None
 
 
 class SourcePatternConfig(BaseModel):
     """Source detection patterns for a specific source."""
-    folder: List[str] = Field(default_factory=list)
-    file: List[str] = Field(default_factory=list)
+    folder: list[str] = Field(default_factory=list)
+    file: list[str] = Field(default_factory=list)
     confidence_boost: float = Field(default=0.1, ge=0.0, le=1.0)
 
 
@@ -38,7 +37,7 @@ class ConfidenceThresholdsConfig(BaseModel):
 
 class PartDetectionConfig(BaseModel):
     """Multi-part detection configuration."""
-    patterns: List[PatternConfig] = Field(default_factory=lambda: [
+    patterns: list[PatternConfig] = Field(default_factory=lambda: [
         PatternConfig(regex=r"(?i)part\s*(\d+)", format="Part {n}", confidence=0.9),
         PatternConfig(regex=r"(?i)cd\s*(\d+)", format="CD{n}", confidence=0.9),
         PatternConfig(regex=r"(?i)disc\s*(\d+)", format="Disc {n}", confidence=0.9),
@@ -53,18 +52,18 @@ class PartDetectionConfig(BaseModel):
 
 class IDExtractionConfig(BaseModel):
     """ID extraction pattern configuration."""
-    strong_patterns: List[PatternConfig] = Field(default_factory=lambda: [
+    strong_patterns: list[PatternConfig] = Field(default_factory=lambda: [
         PatternConfig(regex=r"FC2-PPV-(\d{6,8})", format="FC2-PPV-{}", confidence=0.95, source="fc2"),
         PatternConfig(regex=r"fc2-ppv-(\d{6,8})", format="FC2-PPV-{}", confidence=0.95, source="fc2"),
         PatternConfig(regex=r"FC2PPV-(\d{6,8})", format="FC2-PPV-{}", confidence=0.90, source="fc2"),
         PatternConfig(regex=r"ppv-(\d{6,8})", format="FC2-PPV-{}", confidence=0.80, source="fc2"),
     ])
-    medium_patterns: List[PatternConfig] = Field(default_factory=lambda: [
+    medium_patterns: list[PatternConfig] = Field(default_factory=lambda: [
         PatternConfig(regex=r"([A-Z]{2,5}-\d{3,4})", format="{}", confidence=0.75, source="dmm"),
         PatternConfig(regex=r"([A-Z]{3,5}\d{3,4})", format="{}", confidence=0.65, source="dmm"),
         PatternConfig(regex=r"(\d{6}_\d{3})", format="{}", confidence=0.70, source="dmm"),
     ])
-    weak_patterns: List[PatternConfig] = Field(default_factory=lambda: [
+    weak_patterns: list[PatternConfig] = Field(default_factory=lambda: [
         PatternConfig(regex=r"(\d{6,8})", format="{}", confidence=0.40, source="generic"),
         PatternConfig(regex=r"([A-Z]+\d+)", format="{}", confidence=0.50, source="generic"),
     ])
@@ -72,8 +71,8 @@ class IDExtractionConfig(BaseModel):
 
 class SourceDetectionConfig(BaseModel):
     """Source detection configuration."""
-    global_preference: Optional[str] = None
-    patterns: Dict[str, SourcePatternConfig] = Field(default_factory=lambda: {
+    global_preference: str | None = None
+    patterns: dict[str, SourcePatternConfig] = Field(default_factory=lambda: {
         "fc2": SourcePatternConfig(
             folder=["*FC2*", "*fc2*", "*PPV*", "*ppv*"],
             file=["FC2-*", "fc2_*", "*ppv*", "*PPV*"],
@@ -94,7 +93,7 @@ class PlexOutputConfig(BaseModel):
     single_file_format: str = "{title} ({year})"
     create_nfo: bool = True
     download_assets: bool = True
-    asset_types: List[str] = Field(default_factory=lambda: ["poster", "fanart"])
+    asset_types: list[str] = Field(default_factory=lambda: ["poster", "fanart"])
 
 
 class APIConfig(BaseModel):
@@ -114,38 +113,39 @@ class MatchingConfig(BaseModel):
 class TaggerrConfig(BaseModel):
     """Main Taggerr configuration."""
     matching: MatchingConfig = Field(default_factory=MatchingConfig)
-    
+
     source_detection: SourceDetectionConfig = Field(default_factory=SourceDetectionConfig)
     multi_part: PartDetectionConfig = Field(default_factory=PartDetectionConfig)
     id_extraction: IDExtractionConfig = Field(default_factory=IDExtractionConfig)
     plex_output: PlexOutputConfig = Field(default_factory=PlexOutputConfig)
     api: APIConfig = Field(default_factory=APIConfig)
-    
+
     # File processing
-    video_extensions: List[str] = Field(default_factory=lambda: [
+    processing_mode: str = Field(default="inplace", pattern="^(inplace|hardlink|copy)$")
+    video_extensions: list[str] = Field(default_factory=lambda: [
         ".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm", ".m4v", ".mpg", ".mpeg"
     ])
-    
+
     # Logging
     log_level: str = "INFO"
-    log_file: Optional[str] = None
+    log_file: str | None = None
 
 
 class ConfigManager:
     """Manages configuration loading and saving."""
-    
+
     DEFAULT_CONFIG_NAME = "taggerr.yaml"
-    
-    def __init__(self, config_path: Optional[Path] = None):
+
+    def __init__(self, config_path: Path | None = None):
         """Initialize config manager."""
         self.config_path = config_path or self._get_default_config_path()
-        self._config: Optional[TaggerrConfig] = None
-    
+        self._config: TaggerrConfig | None = None
+
     def load(self) -> TaggerrConfig:
         """Load configuration from file or create default."""
         if self.config_path.exists():
             try:
-                with open(self.config_path, 'r', encoding='utf-8') as f:
+                with open(self.config_path, encoding='utf-8') as f:
                     data = yaml.safe_load(f)
                     self._config = TaggerrConfig(**data)
             except Exception as e:
@@ -157,60 +157,60 @@ class ConfigManager:
             print("Creating default configuration")
             self._config = TaggerrConfig()
             self.save()
-        
+
         return self._config
-    
-    def save(self, config: Optional[TaggerrConfig] = None) -> None:
+
+    def save(self, config: TaggerrConfig | None = None) -> None:
         """Save configuration to file."""
         config_to_save = config or self._config
         if config_to_save is None:
             raise ValueError("No configuration to save")
-        
+
         # Ensure directory exists
         self.config_path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         # Convert to dict and save as YAML
         data = config_to_save.model_dump()
         with open(self.config_path, 'w', encoding='utf-8') as f:
             yaml.dump(data, f, default_flow_style=False, indent=2)
-        
+
         print(f"Configuration saved to {self.config_path}")
-    
+
     def get_config(self) -> TaggerrConfig:
         """Get current configuration, loading if necessary."""
         if self._config is None:
             self.load()
         return self._config
-    
+
     def update_config(self, **kwargs) -> None:
         """Update configuration values."""
         if self._config is None:
             self.load()
-        
+
         # Update fields
         for key, value in kwargs.items():
             if hasattr(self._config, key):
                 setattr(self._config, key, value)
-        
+
         self.save()
-    
+
     def _get_default_config_path(self) -> Path:
         """Get default configuration file path."""
         # Look for config in current directory first, then user config dir
         current_dir = Path.cwd() / self.DEFAULT_CONFIG_NAME
         if current_dir.exists():
             return current_dir
-        
+
         # User config directory
         config_dir = Path.home() / ".config" / "taggerr"
         return config_dir / self.DEFAULT_CONFIG_NAME
-    
-    def create_sample_config(self, output_path: Optional[Path] = None) -> None:
+
+    def create_sample_config(self, output_path: Path | None = None) -> None:
         """Create a sample configuration file with comments."""
         output_path = output_path or (Path.cwd() / "taggerr_sample.yaml")
-        
+
         sample_config = TaggerrConfig()
-        
+
         # Add comments to the YAML
         sample_yaml = """# Taggerr Configuration File
 # Edit this file to customize Taggerr's behavior
@@ -306,11 +306,11 @@ video_extensions:
 log_level: "INFO"
 log_file: null  # Set to file path for file logging
 """
-        
+
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with open(output_path, 'w', encoding='utf-8') as f:
             f.write(sample_yaml)
-        
+
         print(f"Sample configuration created at {output_path}")
 
 
@@ -323,7 +323,7 @@ def get_config() -> TaggerrConfig:
     return config_manager.get_config()
 
 
-def load_config(config_path: Optional[Path] = None) -> TaggerrConfig:
+def load_config(config_path: Path | None = None) -> TaggerrConfig:
     """Load configuration from specific path."""
     if config_path:
         manager = ConfigManager(config_path)
