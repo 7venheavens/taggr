@@ -1,0 +1,50 @@
+[project]
+name = "taggrr"
+version = "0.1.0"
+description = "Video file organization tool with multi-level name analysis and Plex compatibility"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "click>=8.0.0",
+    "httpx>=0.24.0",
+    "pyyaml>=6.0.0",
+    "rich>=13.0.0",
+    "pydantic>=2.0.0",
+    "pathlib-mate>=1.0.0",
+]
+
+[project.scripts]
+taggerr = "taggrr.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "pytest-asyncio>=0.21.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+ignore = []
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true

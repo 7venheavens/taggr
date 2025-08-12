@@ -1,0 +1,123 @@
+# Taggerr Configuration File
+# Edit this file to customize Taggerr's behavior
+
+# Matching configuration
+matching:
+  name_analysis:
+    folder_weight: 0.6      # How much to weight folder name matches (0.0-1.0)
+    file_weight: 0.4        # How much to weight filename matches (0.0-1.0)
+    context_boost: 0.1      # Boost when folder provides context (0.0-1.0)
+  
+  confidence_thresholds:
+    auto_process: 85.0      # Auto-process files above this confidence
+    manual_review: 40.0     # Show review prompt between this and auto_process
+    skip_threshold: 20.0    # Skip files below this threshold
+
+# Source detection patterns
+source_detection:
+  global_preference: null   # Override: "fc2", "dmm", etc.
+  patterns:
+    fc2:
+      folder: ["*FC2*", "*fc2*", "*PPV*", "*ppv*"]
+      file: ["FC2-*", "fc2_*", "*ppv*", "*PPV*"]
+      confidence_boost: 0.2
+    dmm:
+      folder: ["*DMM*", "*R18*", "*dmm*", "*r18*"]
+      file: ["*-h.mp4", "*uncensored*", "*DMM*"]
+      confidence_boost: 0.15
+
+# Multi-part video detection
+multi_part:
+  patterns:
+    - regex: "(?i)part\\s*(\\d+)"
+      format: "Part {n}"
+      confidence: 0.9
+    - regex: "(?i)cd\\s*(\\d+)"
+      format: "CD{n}"
+      confidence: 0.9
+    - regex: "(?i)disc\\s*(\\d+)"
+      format: "Disc {n}"
+      confidence: 0.9
+    - regex: "(?i)-(\\d+)(?=\\.\\w+$)"
+      format: "Part {n}"
+      confidence: 0.8
+    - regex: "(?i)_(\\d+)(?=\\.\\w+$)"
+      format: "Part {n}"
+      confidence: 0.8
+  max_parts: 10
+  similarity_threshold: 0.8
+
+# ID extraction patterns
+id_extraction:
+  strong_patterns:
+    - regex: "FC2-PPV-(\\d{6,8})"
+      format: "FC2-PPV-{}"
+      confidence: 0.95
+      source: "fc2"
+    - regex: "fc2-ppv-(\\d{6,8})"
+      format: "FC2-PPV-{}"
+      confidence: 0.95
+      source: "fc2"
+    - regex: "FC2PPV-(\\d{6,8})"
+      format: "FC2-PPV-{}"
+      confidence: 0.90
+      source: "fc2"
+    - regex: "ppv-(\\d{6,8})"
+      format: "FC2-PPV-{}"
+      confidence: 0.80
+      source: "fc2"
+  medium_patterns:
+    - regex: "([A-Z]{2,5}-\\d{3,4})"
+      format: "{}"
+      confidence: 0.75
+      source: "dmm"
+    - regex: "([A-Z]{3,5}\\d{3,4})"
+      format: "{}"
+      confidence: 0.65
+      source: "dmm"
+    - regex: "(\\d{6}_\\d{3})"
+      format: "{}"
+      confidence: 0.70
+      source: "dmm"
+  weak_patterns:
+    - regex: "(\\d{6,8})"
+      format: "{}"
+      confidence: 0.40
+      source: "generic"
+    - regex: "([A-Z]+\\d+)"
+      format: "{}"
+      confidence: 0.50
+      source: "generic"
+
+# Plex output settings
+plex_output:
+  folder_format: "{title} ({year})"
+  file_format: "{title} ({year}) - {part}"
+  single_file_format: "{title} ({year})"
+  create_nfo: true
+  download_assets: true
+  asset_types: ["poster", "fanart"]
+
+# API settings
+api:
+  base_url: "http://localhost:8000"
+  timeout: 30
+  retries: 3
+  retry_delay: 1.0
+
+# Supported video file extensions
+video_extensions:
+  - ".mp4"
+  - ".mkv" 
+  - ".avi"
+  - ".mov"
+  - ".wmv"
+  - ".flv"
+  - ".webm"
+  - ".m4v"
+  - ".mpg"
+  - ".mpeg"
+
+# Logging
+log_level: "INFO"
+log_file: null  # Set to file path for file logging
