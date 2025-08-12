@@ -153,7 +153,6 @@ class TestNFOGenerator:
         assert "<name>Test Creator</name>" in nfo_content  # Creator as actor
         assert "<tag>tag1</tag>" in nfo_content
         assert "<tag>tag2</tag>" in nfo_content
-        assert '<thumb aspect="poster">thumb.jpg</thumb>' in nfo_content
 
         # Verify description/plot is NOT present
         assert "<plot>" not in nfo_content

@@ -385,11 +385,11 @@ class VideoMatcher:
                 and "poster" in self.config.plex_output.asset_types
                 and match_result.api_response.get("poster_url")
             ):
-                poster_path = output_dir / "poster.jpg"
+                folder_jpg_path = output_dir / "folder.jpg"
                 if await client.download_asset(
-                    match_result.api_response["poster_url"], poster_path
+                    match_result.api_response["poster_url"], folder_jpg_path
                 ):
-                    downloaded.append("poster.jpg")
+                    downloaded.append("folder.jpg")
 
             # Download fanart
             if (
@@ -410,10 +410,10 @@ class VideoMatcher:
                 and match_result.api_response["thumbnail_url"].strip()
                 and not match_result.api_response.get("poster_url")
             ):
-                thumb_path = output_dir / "thumb.jpg"
+                folder_jpg_path = output_dir / "folder.jpg"
                 if await client.download_asset(
-                    match_result.api_response["thumbnail_url"], thumb_path
+                    match_result.api_response["thumbnail_url"], folder_jpg_path
                 ):
-                    downloaded.append("thumb.jpg")
+                    downloaded.append("folder.jpg")
 
         return downloaded

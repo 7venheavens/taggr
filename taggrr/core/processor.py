@@ -138,10 +138,16 @@ class VideoProcessor:
             except Exception as e:
                 logger.warning(f"API search failed: {e}")
 
-        # Step 4: Create fallback match if API failed
+        # Step 4: Skip processing if no metadata found
         if not match_result:
-            logger.info("Creating fallback match from analysis")
-            match_result = self._create_fallback_match(analysis, video_group)
+            logger.info("No metadata found - skipping processing to leave files unchanged")
+            return ProcessingResult(
+                original_path=video_group.folder_path,
+                output_path=None,
+                match_result=None,
+                status="skipped",
+                error_message="No metadata found - files left unchanged",
+            )
 
         # Step 5: Plan output structure
         output_plan = self.output_planner.plan_output(
@@ -191,46 +197,6 @@ class VideoProcessor:
                 error_message="DRY RUN - No changes made",
             )
 
-    def _create_fallback_match(self, analysis, video_group: VideoGroup) -> MatchResult:
-        """Create a fallback match result when API lookup fails."""
-        from ..core.models import ConfidenceBreakdown
-
-        # Use analysis data to create a basic match
-        title = analysis.primary_id or video_group.group_name or "Unknown Video"
-
-        # Clean up title
-        if title.startswith("FC2-PPV-"):
-            clean_title = f"FC2 PPV {title[8:]}"
-        else:
-            clean_title = title.replace("_", " ").replace("-", " ").title()
-
-        metadata = {
-            "title": clean_title,
-            "id": analysis.primary_id,
-            "year": analysis.year,
-            "source": analysis.source_hints[0].source_type.value
-            if analysis.source_hints
-            else "unknown",
-        }
-
-        confidence = ConfidenceBreakdown(
-            folder_name_match=analysis.confidence_scores.get("folder", 0.0),
-            file_name_match=analysis.confidence_scores.get("filename", 0.0),
-            source_match=0.5,  # Moderate confidence for fallback
-            overall_confidence=analysis.confidence_scores.get("combined", 0.0),
-        )
-
-        from ..core.models import SourceType
-
-        return MatchResult(
-            video_metadata=metadata,
-            confidence_breakdown=confidence,
-            source=analysis.source_hints[0].source_type
-            if analysis.source_hints
-            else SourceType.GENERIC,
-            suggested_output_name=clean_title,
-            video_id=analysis.primary_id,
-        )
 
     async def _execute_output_plan(
         self, output_plan: dict[str, Any], match_result: MatchResult

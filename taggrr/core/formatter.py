@@ -52,6 +52,7 @@ class PlexFormatter:
     def format_folder_name(self, match_result: MatchResult) -> str:
         """Generate Plex-compatible folder name."""
         title = match_result.video_metadata.get("title", "Unknown Title")
+        title = self._clean_title(title)
         year = match_result.video_metadata.get("year")
 
         # For FC2 content, use the video ID instead of long Japanese titles to avoid Windows path issues
@@ -79,6 +80,7 @@ class PlexFormatter:
     ) -> str:
         """Generate Plex-compatible file name."""
         title = match_result.video_metadata.get("title", "Unknown Title")
+        title = self._clean_title(title)
         year = match_result.video_metadata.get("year")
 
         # For FC2 content, use the video ID instead of long Japanese titles to avoid Windows path issues
@@ -140,6 +142,18 @@ class PlexFormatter:
         if video_file.detected_parts:
             return video_file.detected_parts[0].part_pattern
         return "Part 1"  # Default fallback
+
+    def _clean_title(self, title: str) -> str:
+        """Clean title by removing +++ prefix and extra whitespace."""
+        if not title:
+            return title
+
+        # Remove +++ from start of title
+        if title.startswith("+++"):
+            title = title[3:]
+
+        # Strip whitespace
+        return title.strip()
 
     def _sanitize_name(self, name: str) -> str:
         """Sanitize name for file system compatibility."""
@@ -258,12 +272,7 @@ class NFOGenerator:
                 f'  <uniqueid type="scraperr">{metadata["id"]}</uniqueid>'
             )
 
-        # Poster and fanart
-        if metadata.get("poster_url"):
-            nfo_content.append('  <thumb aspect="poster">poster.jpg</thumb>')
-        elif metadata.get("thumbnail_url") and metadata["thumbnail_url"].strip():
-            # Use thumbnail as poster if no dedicated poster
-            nfo_content.append('  <thumb aspect="poster">thumb.jpg</thumb>')
+        # Poster and fanart removed - using folder.jpg as default instead
 
         if metadata.get("fanart_url"):
             nfo_content.append("  <fanart>")
@@ -351,9 +360,9 @@ class OutputPlanner:
             if match_result.api_response and match_result.api_response.get(
                 "poster_url"
             ):
-                poster_path = output_folder / "poster.jpg"
+                folder_jpg_path = output_folder / "folder.jpg"
                 output_structure["_poster"] = {
-                    "target_path": poster_path,
+                    "target_path": folder_jpg_path,
                     "url": match_result.api_response["poster_url"],
                     "action": "download",
                 }
@@ -375,9 +384,9 @@ class OutputPlanner:
                 and match_result.api_response["thumbnail_url"].strip()
                 and not match_result.api_response.get("poster_url")
             ):
-                thumb_path = output_folder / "thumb.jpg"
+                folder_jpg_path = output_folder / "folder.jpg"
                 output_structure["_thumbnail"] = {
-                    "target_path": thumb_path,
+                    "target_path": folder_jpg_path,
                     "url": match_result.api_response["thumbnail_url"],
                     "action": "download",
                 }

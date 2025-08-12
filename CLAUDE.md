@@ -46,14 +46,17 @@ uv run pytest tests/core/test_analyzer.py::TestNameAnalyzer::test_fc2_id_extract
 
 **Running the Application:**
 ```bash
-# Run via CLI entry point
-taggerr /path/to/input /path/to/output
+# Run via CLI entry point (in-place organization)
+taggerr /path/to/input
+
+# Run with separate output directory
+taggerr /path/to/input --output-dir /path/to/output
 
 # Run with dry-run mode
-taggerr /path/to/input /path/to/output --dry-run
+taggerr /path/to/input --dry-run
 
 # Run with custom config
-taggerr /path/to/input /path/to/output --config custom_config.yaml
+taggerr /path/to/input --config custom_config.yaml
 
 # Run directly with Python
 python main.py
