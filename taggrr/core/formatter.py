@@ -55,7 +55,8 @@ class PlexFormatter:
         title = self._clean_title(title)
         year = match_result.video_metadata.get("year")
 
-        # For FC2 content, use the video ID instead of long Japanese titles to avoid Windows path issues
+        # For FC2 content, use the video ID instead of long Japanese titles
+        # to avoid Windows path issues
         if (
             match_result.source.name == "FC2"
             and match_result.video_id
@@ -83,7 +84,8 @@ class PlexFormatter:
         title = self._clean_title(title)
         year = match_result.video_metadata.get("year")
 
-        # For FC2 content, use the video ID instead of long Japanese titles to avoid Windows path issues
+        # For FC2 content, use the video ID instead of long Japanese titles
+        # to avoid Windows path issues
         if (
             match_result.source.name == "FC2"
             and match_result.video_id
@@ -206,9 +208,14 @@ class NFOGenerator:
         if metadata.get("year"):
             nfo_content.append(f"  <year>{metadata['year']}</year>")
 
+        # Director - use director field if present, otherwise use creator
         if metadata.get("director"):
             nfo_content.append(
                 f"  <director>{self._escape_xml(metadata['director'])}</director>"
+            )
+        elif metadata.get("creator") and metadata["creator"].strip():
+            nfo_content.append(
+                f"  <director>{self._escape_xml(metadata['creator'])}</director>"
             )
 
         if metadata.get("duration"):
@@ -229,7 +236,7 @@ class NFOGenerator:
                         duration = (hours * 60) + minutes + (seconds / 60)
                 except (ValueError, IndexError):
                     duration = None
-            elif isinstance(duration, (int, float)):
+            elif isinstance(duration, int | float):
                 # Convert to minutes if in seconds
                 if duration > 1000:  # Assume seconds if > 1000
                     duration = duration // 60
@@ -242,13 +249,15 @@ class NFOGenerator:
             for genre in metadata["genres"]:
                 nfo_content.append(f"  <genre>{self._escape_xml(genre)}</genre>")
 
-        # Creator (as director/actor)
-        if metadata.get("creator") and metadata["creator"].strip():
-            nfo_content.append(f"  <actor>")
-            nfo_content.append(
-                f"    <name>{self._escape_xml(metadata['creator'])}</name>"
-            )
-            nfo_content.append(f"  </actor>")
+        # Actors
+        if metadata.get("actors"):
+            for actor in metadata["actors"]:
+                if isinstance(actor, dict) and actor.get("name"):
+                    nfo_content.append("  <actor>")
+                    nfo_content.append(
+                        f"    <name>{self._escape_xml(actor['name'])}</name>"
+                    )
+                    nfo_content.append("  </actor>")
 
         # Tags
         if metadata.get("tags") and isinstance(metadata["tags"], list):

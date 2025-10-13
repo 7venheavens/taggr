@@ -150,13 +150,72 @@ class TestNFOGenerator:
         assert "<genre>Drama</genre>" in nfo_content
         assert "<rating>8.5</rating>" in nfo_content
         assert "<studio>Test Studio</studio>" in nfo_content
-        assert "<name>Test Creator</name>" in nfo_content  # Creator as actor
         assert "<tag>tag1</tag>" in nfo_content
         assert "<tag>tag2</tag>" in nfo_content
 
         # Verify description/plot is NOT present
         assert "<plot>" not in nfo_content
         assert "A movie with all metadata" not in nfo_content
+
+    def test_creator_as_director_fallback(self, test_config):
+        """Test that creator is used as director when director field is not present."""
+        match_result = MatchResult(
+            video_metadata={
+                "title": "FC2 Video",
+                "creator": "天使の戯れ",
+                "actors": [],
+            },
+            confidence_breakdown=ConfidenceBreakdown(0.8, 0.8, 0.8, 0.8),
+            source=SourceType.FC2,
+            suggested_output_name="FC2 Video",
+            video_id="4773622",
+        )
+
+        generator = NFOGenerator(test_config)
+        nfo_content = generator.generate_movie_nfo(match_result)
+
+        # Creator should be mapped to director when director is not present
+        assert "<director>天使の戯れ</director>" in nfo_content
+        # Should not be mapped to actor
+        assert "<actor>" not in nfo_content
+
+    def test_actors_array_processing(self, test_config):
+        """Test that actors array is properly processed into actor tags."""
+        match_result = MatchResult(
+            video_metadata={
+                "title": "Video with Actors",
+                "creator": "Studio Name",
+                "actors": [
+                    {
+                        "id": 1,
+                        "name": "Actor One",
+                        "image_url": None,
+                        "created_at": "",
+                        "updated_at": "",
+                    },
+                    {
+                        "id": 2,
+                        "name": "Actor Two",
+                        "image_url": None,
+                        "created_at": "",
+                        "updated_at": "",
+                    },
+                ],
+            },
+            confidence_breakdown=ConfidenceBreakdown(0.8, 0.8, 0.8, 0.8),
+            source=SourceType.FC2,
+            suggested_output_name="Video with Actors",
+            video_id="test-123",
+        )
+
+        generator = NFOGenerator(test_config)
+        nfo_content = generator.generate_movie_nfo(match_result)
+
+        # Actors should be properly added
+        assert "<name>Actor One</name>" in nfo_content
+        assert "<name>Actor Two</name>" in nfo_content
+        # Creator should be director, not actor
+        assert "<director>Studio Name</director>" in nfo_content
 
     def test_escape_xml_characters(self, test_config):
         """Test XML character escaping."""
@@ -285,7 +344,9 @@ class TestOutputPlanner:
 
         poster_info = plan["structure"]["_poster"]
         assert poster_info["action"] == "download"
-        assert "poster.jpg" in str(poster_info["target_path"])
+        assert "folder.jpg" in str(
+            poster_info["target_path"]
+        )  # Poster is saved as folder.jpg for Plex
 
     def test_validate_output_plan(self, test_config, temp_dir):
         """Test output plan validation."""
