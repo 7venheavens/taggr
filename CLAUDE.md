@@ -19,15 +19,20 @@ uv sync --group dev
 
 **Linting and Type Checking:**
 ```bash
-# Run Ruff linter
-ruff check .
+# Run Ruff linter (must use uv run)
+uv run ruff check .
 
-# Run Ruff formatter
-ruff format .
+# Run Ruff formatter (must use uv run)
+uv run ruff format .
 
-# Run MyPy type checker
-mypy taggrr/
+# Auto-fix linting issues where possible
+uv run ruff check --fix .
+
+# Run MyPy type checker (must use uv run)
+uv run mypy taggrr/
 ```
+
+**Important**: Always use `uv run` prefix for development tools (ruff, mypy, pytest). These tools are managed by uv and won't be available in the system PATH.
 
 **Testing:**
 ```bash
