@@ -140,7 +140,9 @@ class VideoProcessor:
 
         # Step 4: Skip processing if no metadata found
         if not match_result:
-            logger.info("No metadata found - skipping processing to leave files unchanged")
+            logger.info(
+                "No metadata found - skipping processing to leave files unchanged"
+            )
             return ProcessingResult(
                 original_path=video_group.folder_path,
                 output_path=None,
@@ -196,7 +198,6 @@ class VideoProcessor:
                 status="success",
                 error_message="DRY RUN - No changes made",
             )
-
 
     async def _execute_output_plan(
         self, output_plan: dict[str, Any], match_result: MatchResult
