@@ -259,11 +259,11 @@ class NFOGenerator:
                     )
                     nfo_content.append("  </actor>")
 
-        # Tags
+        # Tags (additional genres)
         if metadata.get("tags") and isinstance(metadata["tags"], list):
             for tag in metadata["tags"]:
                 if tag and str(tag).strip():  # Check for non-empty tags
-                    nfo_content.append(f"  <tag>{self._escape_xml(str(tag))}</tag>")
+                    nfo_content.append(f"  <genre>{self._escape_xml(str(tag))}</genre>")
 
         # Rating (if available)
         if metadata.get("rating"):

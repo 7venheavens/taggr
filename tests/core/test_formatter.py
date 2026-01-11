@@ -150,8 +150,8 @@ class TestNFOGenerator:
         assert "<genre>Drama</genre>" in nfo_content
         assert "<rating>8.5</rating>" in nfo_content
         assert "<studio>Test Studio</studio>" in nfo_content
-        assert "<tag>tag1</tag>" in nfo_content
-        assert "<tag>tag2</tag>" in nfo_content
+        assert "<genre>tag1</genre>" in nfo_content
+        assert "<genre>tag2</genre>" in nfo_content
 
         # Verify description/plot is NOT present
         assert "<plot>" not in nfo_content
