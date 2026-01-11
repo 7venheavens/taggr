@@ -1,5 +1,6 @@
 """Pytest configuration and fixtures."""
 
+import os
 import shutil
 import tempfile
 from pathlib import Path
@@ -102,3 +103,22 @@ def sample_match_result():
         suggested_output_name="Test Movie Title (2024)",
         video_id="FC2-PPV-1234567",
     )
+
+
+@pytest.fixture
+def hardlinked_videos(temp_dir):
+    """Create hardlinked video files for testing."""
+    folder_a = temp_dir / "folder_a"
+    folder_b = temp_dir / "folder_b"
+    folder_a.mkdir()
+    folder_b.mkdir()
+
+    # Create original in folder B
+    original = folder_b / "FC2-PPV-123456.mp4"
+    original.write_bytes(b"fake video content")
+
+    # Create hardlink in folder A
+    hardlink = folder_a / "fc2-ppv-123456.mp4"
+    os.link(original, hardlink)
+
+    return folder_a, folder_b, original, hardlink
