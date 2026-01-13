@@ -29,6 +29,9 @@ Examples:
     # Fix duplicates with auto-confirmation
     python find_duplicates.py /media/original /media/organized --fix --confirm
 
+    # Fix with hash verification (slower but safer)
+    python find_duplicates.py /media/original /media/organized --fix --verify-hash
+
 Options:
     --min-confidence FLOAT     Minimum ID extraction confidence (0.0-1.0) [default: 0.5]
     --show-hardlinks-only      Show only hardlinked files
@@ -36,6 +39,7 @@ Options:
     --output-json PATH         Export results to JSON file
     --fix                      Replace copies in Folder B with hardlinks to Folder A
     --confirm                  Auto-confirm all operations (use with --fix)
+    --verify-hash              Verify files with SHA256 before linking (use with --fix)
 
 Output:
     The script displays duplicate groups with:
@@ -173,23 +177,26 @@ def export_json(groups: list[DuplicateGroup], output_path: Path) -> None:
 
 
 def fix_duplicates(
-    groups: list[DuplicateGroup], auto_confirm: bool = False
+    groups: list[DuplicateGroup],
+    auto_confirm: bool = False,
+    verify_hash: bool = False,
 ) -> tuple[int, int, int]:
     """
     Replace duplicate copies in Folder B with hardlinks to Folder A.
 
     Folder A is the source (for seeding torrents), Folder B is the organized
     library. For any files that are true copies (not hardlinked), this function:
-    1. Verifies files are identical using SHA256 hashing
+    1. Optionally verifies files are identical using SHA256 hashing
     2. Deletes the copy in Folder B
     3. Creates a hardlink from B to A (saves space while maintaining both)
 
     Hardlinked files are already optimal and are skipped.
-    Files with mismatched hashes are skipped for safety.
+    Files with mismatched hashes are skipped for safety (if verify_hash is enabled).
 
     Args:
         groups: List of duplicate groups to process
         auto_confirm: If True, skip confirmation prompts
+        verify_hash: If True, verify files are identical using SHA256 before linking
 
     Returns:
         Tuple of (files_fixed, space_freed_bytes, hardlinks_created)
@@ -248,31 +255,33 @@ def fix_duplicates(
 
         source_path = source_file.file_path
 
-        # Verify files are identical by comparing hashes
-        click.echo("Verifying files are identical...")
-        try:
-            hash_a = calculate_file_hash(source_path)
-            hash_b = calculate_file_hash(folder_b_path)
+        # Verify files are identical by comparing hashes (if enabled)
+        if verify_hash:
+            click.echo("Verifying files are identical...")
+            try:
+                hash_a = calculate_file_hash(source_path)
+                hash_b = calculate_file_hash(folder_b_path)
 
-            if hash_a != hash_b:
-                click.echo(
-                    click.style(
-                        "⚠ WARNING: Files have different content! Skipping for safety.",
-                        fg="red",
-                        bold=True,
+                if hash_a != hash_b:
+                    click.echo(
+                        click.style(
+                            "⚠ WARNING: Files have different content! "
+                            "Skipping for safety.",
+                            fg="red",
+                            bold=True,
+                        )
                     )
+                    click.echo(f"  Source hash: {hash_a[:16]}...")
+                    click.echo(f"  Dest hash:   {hash_b[:16]}...")
+                    continue
+            except Exception as e:
+                click.echo(
+                    click.style(f"✗ Error calculating hash: {e}", fg="red")
                 )
-                click.echo(f"  Source hash: {hash_a[:16]}...")
-                click.echo(f"  Dest hash:   {hash_b[:16]}...")
                 continue
-        except Exception as e:
-            click.echo(
-                click.style(f"✗ Error calculating hash: {e}", fg="red")
-            )
-            continue
 
-        click.echo(click.style("✓ Files are identical", fg="green"))
-        click.echo()
+            click.echo(click.style("✓ Files are identical", fg="green"))
+            click.echo()
 
         click.echo("Will REPLACE copy in Folder B with hardlink:")
         click.echo(
@@ -349,6 +358,11 @@ def fix_duplicates(
     is_flag=True,
     help="Auto-confirm all operations (use with --fix)",
 )
+@click.option(
+    "--verify-hash",
+    is_flag=True,
+    help="Verify files with SHA256 before creating hardlinks (slower but safer)",
+)
 def main(
     folder_a: Path,
     folder_b: Path,
@@ -358,11 +372,16 @@ def main(
     output_json: Path | None,
     fix: bool,
     confirm: bool,
+    verify_hash: bool,
 ) -> None:
     """Find duplicate videos between FOLDER_A and FOLDER_B."""
     # Validate options
     if confirm and not fix:
         click.echo("Error: --confirm can only be used with --fix")
+        return
+
+    if verify_hash and not fix:
+        click.echo("Error: --verify-hash can only be used with --fix")
         return
 
     # Display header
@@ -385,7 +404,7 @@ def main(
     # If in fix mode, process immediately
     if fix:
         files_fixed, space_freed, hardlinks_created = fix_duplicates(
-            groups, auto_confirm=confirm
+            groups, auto_confirm=confirm, verify_hash=verify_hash
         )
 
         # Display final summary

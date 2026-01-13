@@ -476,7 +476,7 @@ class TestFixDuplicates:
         assert "No duplicate copies found to fix" in captured.out
 
     def test_skips_files_with_different_content(self, temp_dir, capsys):
-        """Test that files with mismatched hashes are skipped."""
+        """Test that files with mismatched hashes are skipped when verify_hash=True."""
         folder_a = temp_dir / "folder_a"
         folder_b = temp_dir / "folder_b"
         folder_a.mkdir()
@@ -517,8 +517,9 @@ class TestFixDuplicates:
         orig_content_a = file_a_path.read_bytes()
         orig_content_b = file_b_path.read_bytes()
 
+        # Run with verify_hash=True
         files_fixed, space_freed, hardlinks_created = fix_duplicates(
-            [group], auto_confirm=True
+            [group], auto_confirm=True, verify_hash=True
         )
 
         # No files should be modified due to hash mismatch
@@ -535,6 +536,60 @@ class TestFixDuplicates:
         captured = capsys.readouterr()
         assert "different content" in captured.out.lower()
         assert "skipping" in captured.out.lower()
+
+    def test_skip_hash_verification_when_disabled(self, temp_dir, capsys):
+        """Test that hash verification is skipped when verify_hash=False."""
+        folder_a = temp_dir / "folder_a"
+        folder_b = temp_dir / "folder_b"
+        folder_a.mkdir()
+        folder_b.mkdir()
+
+        # Create files with DIFFERENT content but same ID
+        file_a_path = folder_a / "NOHASH-456.mp4"
+        file_b_path = folder_b / "NOHASH-456.mp4"
+        file_a_path.write_bytes(b"content A")
+        file_b_path.write_bytes(b"content B")
+
+        file_a = VideoFile(
+            file_path=file_a_path,
+            folder_name="folder_a",
+            file_name="NOHASH-456.mp4",
+            file_size=len(b"content A"),
+        )
+        file_b = VideoFile(
+            file_path=file_b_path,
+            folder_name="folder_b",
+            file_name="NOHASH-456.mp4",
+            file_size=len(b"content B"),
+        )
+
+        group = DuplicateGroup(
+            video_id="NOHASH456",
+            confidence=0.9,
+            source_type=SourceType.DMM,
+            folder_a_files=[file_a],
+            folder_b_file=file_b,
+            hardlink_pairs=[],
+            copy_pairs=[(file_a, file_b)],
+            total_size=len(b"content A"),
+            wasted_space=len(b"content A"),
+        )
+
+        # Run with verify_hash=False (should create hardlink despite different content)
+        files_fixed, space_freed, hardlinks_created = fix_duplicates(
+            [group], auto_confirm=True, verify_hash=False
+        )
+
+        # Files should be linked even though content differs
+        assert files_fixed == 1
+        assert hardlinks_created == 1
+        assert file_a_path.exists()
+        assert file_b_path.exists()
+        assert file_a_path.stat().st_ino == file_b_path.stat().st_ino
+
+        # Should NOT have verification message
+        captured = capsys.readouterr()
+        assert "verifying" not in captured.out.lower()
 
 
 class TestCLIIntegration:
