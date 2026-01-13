@@ -6,9 +6,53 @@ from unittest.mock import patch
 
 from click.testing import CliRunner
 
-from find_duplicates import fix_duplicates, format_size, main
+from find_duplicates import calculate_file_hash, fix_duplicates, format_size, main
 from taggrr.core.duplicate_detector import DuplicateGroup
 from taggrr.core.models import SourceType, VideoFile
+
+
+class TestCalculateFileHash:
+    """Test file hash calculation."""
+
+    def test_identical_files_same_hash(self, temp_dir):
+        """Test that identical files produce the same hash."""
+        file1 = temp_dir / "file1.txt"
+        file2 = temp_dir / "file2.txt"
+
+        content = b"test content for hashing"
+        file1.write_bytes(content)
+        file2.write_bytes(content)
+
+        hash1 = calculate_file_hash(file1)
+        hash2 = calculate_file_hash(file2)
+
+        assert hash1 == hash2
+        assert len(hash1) == 64  # SHA256 produces 64 hex characters
+
+    def test_different_files_different_hash(self, temp_dir):
+        """Test that different files produce different hashes."""
+        file1 = temp_dir / "file1.txt"
+        file2 = temp_dir / "file2.txt"
+
+        file1.write_bytes(b"content A")
+        file2.write_bytes(b"content B")
+
+        hash1 = calculate_file_hash(file1)
+        hash2 = calculate_file_hash(file2)
+
+        assert hash1 != hash2
+
+    def test_large_file_hashing(self, temp_dir):
+        """Test hashing of large files (chunked reading)."""
+        large_file = temp_dir / "large.bin"
+        # Create a 1MB file
+        large_file.write_bytes(b"x" * (1024 * 1024))
+
+        hash_result = calculate_file_hash(large_file)
+
+        assert len(hash_result) == 64
+        # Verify it's a valid hex string
+        int(hash_result, 16)
 
 
 class TestFormatSize:
@@ -430,6 +474,67 @@ class TestFixDuplicates:
         # the message says "No duplicate copies found"
         captured = capsys.readouterr()
         assert "No duplicate copies found to fix" in captured.out
+
+    def test_skips_files_with_different_content(self, temp_dir, capsys):
+        """Test that files with mismatched hashes are skipped."""
+        folder_a = temp_dir / "folder_a"
+        folder_b = temp_dir / "folder_b"
+        folder_a.mkdir()
+        folder_b.mkdir()
+
+        # Create files with DIFFERENT content but same ID pattern
+        file_a_path = folder_a / "MISMATCH-123.mp4"
+        file_b_path = folder_b / "MISMATCH-123.mp4"
+        file_a_path.write_bytes(b"different content A")
+        file_b_path.write_bytes(b"different content B")
+
+        file_a = VideoFile(
+            file_path=file_a_path,
+            folder_name="folder_a",
+            file_name="MISMATCH-123.mp4",
+            file_size=len(b"different content A"),
+        )
+        file_b = VideoFile(
+            file_path=file_b_path,
+            folder_name="folder_b",
+            file_name="MISMATCH-123.mp4",
+            file_size=len(b"different content B"),
+        )
+
+        group = DuplicateGroup(
+            video_id="MISMATCH123",
+            confidence=0.9,
+            source_type=SourceType.DMM,
+            folder_a_files=[file_a],
+            folder_b_file=file_b,
+            hardlink_pairs=[],
+            copy_pairs=[(file_a, file_b)],
+            total_size=len(b"different content A"),
+            wasted_space=len(b"different content A"),
+        )
+
+        # Store original content
+        orig_content_a = file_a_path.read_bytes()
+        orig_content_b = file_b_path.read_bytes()
+
+        files_fixed, space_freed, hardlinks_created = fix_duplicates(
+            [group], auto_confirm=True
+        )
+
+        # No files should be modified due to hash mismatch
+        assert files_fixed == 0
+        assert space_freed == 0
+        assert hardlinks_created == 0
+
+        # Files should remain unchanged
+        assert file_a_path.read_bytes() == orig_content_a
+        assert file_b_path.read_bytes() == orig_content_b
+        assert file_a_path.stat().st_ino != file_b_path.stat().st_ino
+
+        # Should have warning message
+        captured = capsys.readouterr()
+        assert "different content" in captured.out.lower()
+        assert "skipping" in captured.out.lower()
 
 
 class TestCLIIntegration:

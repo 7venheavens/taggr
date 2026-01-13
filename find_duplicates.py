@@ -4,7 +4,8 @@ Find duplicate video files across two directories.
 
 This script compares video files from two folders by extracting video IDs
 (e.g., FC2-PPV-123456, MIDE-123) and detecting whether files are hardlinked
-or true copies wasting disk space.
+or true copies wasting disk space. When fixing duplicates, files are verified
+using SHA256 hashing before creating hardlinks to ensure they are identical.
 
 Usage:
     python find_duplicates.py <folder_a> <folder_b> [OPTIONS]
@@ -52,12 +53,31 @@ Environment:
     Designed for Linux + NFS environments where inode detection is reliable.
 """
 
+import hashlib
 import json
 from pathlib import Path
 
 import click
 
 from taggrr.core.duplicate_detector import DuplicateDetector, DuplicateGroup
+
+
+def calculate_file_hash(file_path: Path, chunk_size: int = 8192) -> str:
+    """
+    Calculate SHA256 hash of a file.
+
+    Args:
+        file_path: Path to the file
+        chunk_size: Size of chunks to read (default 8KB)
+
+    Returns:
+        Hexadecimal string of the file's SHA256 hash
+    """
+    sha256 = hashlib.sha256()
+    with open(file_path, "rb") as f:
+        while chunk := f.read(chunk_size):
+            sha256.update(chunk)
+    return sha256.hexdigest()
 
 
 def format_size(bytes_count: int) -> str:
@@ -160,10 +180,12 @@ def fix_duplicates(
 
     Folder A is the source (for seeding torrents), Folder B is the organized
     library. For any files that are true copies (not hardlinked), this function:
-    1. Deletes the copy in Folder B
-    2. Creates a hardlink from B to A (saves space while maintaining both)
+    1. Verifies files are identical using SHA256 hashing
+    2. Deletes the copy in Folder B
+    3. Creates a hardlink from B to A (saves space while maintaining both)
 
     Hardlinked files are already optimal and are skipped.
+    Files with mismatched hashes are skipped for safety.
 
     Args:
         groups: List of duplicate groups to process
@@ -225,6 +247,32 @@ def fix_duplicates(
             continue
 
         source_path = source_file.file_path
+
+        # Verify files are identical by comparing hashes
+        click.echo("Verifying files are identical...")
+        try:
+            hash_a = calculate_file_hash(source_path)
+            hash_b = calculate_file_hash(folder_b_path)
+
+            if hash_a != hash_b:
+                click.echo(
+                    click.style(
+                        "⚠ WARNING: Files have different content! Skipping for safety.",
+                        fg="red",
+                        bold=True,
+                    )
+                )
+                click.echo(f"  Source hash: {hash_a[:16]}...")
+                click.echo(f"  Dest hash:   {hash_b[:16]}...")
+                continue
+        except Exception as e:
+            click.echo(
+                click.style(f"✗ Error calculating hash: {e}", fg="red")
+            )
+            continue
+
+        click.echo(click.style("✓ Files are identical", fg="green"))
+        click.echo()
 
         click.echo("Will REPLACE copy in Folder B with hardlink:")
         click.echo(
