@@ -22,7 +22,7 @@ Examples:
     # Adjust confidence threshold
     python find_duplicates.py /media/original /media/organized --min-confidence 0.75
 
-    # Fix duplicates by removing copies from Folder B/destination (interactive)
+    # Fix duplicates by replacing copies with hardlinks (interactive)
     python find_duplicates.py /media/original /media/organized --fix
 
     # Fix duplicates with auto-confirmation
@@ -33,8 +33,8 @@ Options:
     --show-hardlinks-only      Show only hardlinked files
     --show-copies-only         Show only true copy files (wasting space)
     --output-json PATH         Export results to JSON file
-    --fix                      Remove duplicate copies from Folder B/destination
-    --confirm                  Auto-confirm all deletions (use with --fix)
+    --fix                      Replace copies in Folder B with hardlinks to Folder A
+    --confirm                  Auto-confirm all operations (use with --fix)
 
 Output:
     The script displays duplicate groups with:
@@ -154,41 +154,45 @@ def export_json(groups: list[DuplicateGroup], output_path: Path) -> None:
 
 def fix_duplicates(
     groups: list[DuplicateGroup], auto_confirm: bool = False
-) -> tuple[int, int]:
+) -> tuple[int, int, int]:
     """
-    Remove duplicate copies from Folder B (keeps hardlinks).
+    Replace duplicate copies in Folder B with hardlinks to Folder A.
 
-    Only deletes files from Folder B that are true copies (not hardlinked)
-    of files in Folder A. Hardlinked files are preserved as they don't
-    waste space.
+    Folder A is the source (for seeding torrents), Folder B is the organized
+    library. For any files that are true copies (not hardlinked), this function:
+    1. Deletes the copy in Folder B
+    2. Creates a hardlink from B to A (saves space while maintaining both)
+
+    Hardlinked files are already optimal and are skipped.
 
     Args:
         groups: List of duplicate groups to process
         auto_confirm: If True, skip confirmation prompts
 
     Returns:
-        Tuple of (files_deleted, space_freed_bytes)
+        Tuple of (files_fixed, space_freed_bytes, hardlinks_created)
     """
-    files_deleted = 0
+    files_fixed = 0
     space_freed = 0
+    hardlinks_created = 0
 
     # Filter to only groups with true copies
     copy_groups = [g for g in groups if g.has_copies]
 
     if not copy_groups:
         click.echo("\nNo duplicate copies found to fix.")
-        return (0, 0)
+        return (0, 0, 0)
 
     click.echo()
     click.echo("=" * 60)
-    click.echo("FIX MODE: Remove duplicate copies from Folder B")
+    click.echo("FIX MODE: Replace copies with hardlinks")
     click.echo("=" * 60)
     hardlink_only_count = len(
         [g for g in groups if g.has_hardlinks and not g.has_copies]
     )
     click.echo(
         f"Found {len(copy_groups)} groups with true copies "
-        f"(skipping {hardlink_only_count} hardlink groups)"
+        f"(skipping {hardlink_only_count} already-hardlinked groups)"
     )
     click.echo()
 
@@ -202,43 +206,69 @@ def fix_duplicates(
         click.echo(f"Potential space savings: {format_size(group.wasted_space)}")
         click.echo()
 
-        # Show what will be deleted (folder B file if it's a copy)
+        # Get the folder B file (copy to be replaced)
         folder_b_path = group.folder_b_file.file_path
         folder_b_size = group.folder_b_file.file_size or 0
 
-        click.echo("Will DELETE from Folder B:")
-        click.echo(f"  • {folder_b_path} ({format_size(folder_b_size)})")
-        click.echo()
-        click.echo("Will KEEP in Folder A:")
-        for file_a in group.folder_a_files:
-            click.echo(f"  • {file_a.file_path}")
+        # Get the first folder A file (source for hardlink)
+        # Use the first file from folder A that's part of a copy pair
+        source_file = None
+        for file_a, file_b in group.copy_pairs:
+            if file_b.file_path == folder_b_path:
+                source_file = file_a
+                break
 
-        # Confirm deletion
+        if not source_file:
+            click.echo(
+                click.style("⚠ Skipping: No source file found", fg="yellow")
+            )
+            continue
+
+        source_path = source_file.file_path
+
+        click.echo("Will REPLACE copy in Folder B with hardlink:")
+        click.echo(
+            f"  📄 Copy (to delete): {folder_b_path} ({format_size(folder_b_size)})"
+        )
+        click.echo(f"  🔗 Source (to hardlink): {source_path}")
+        click.echo()
+        click.echo("Result: Folder B will have a hardlink to Folder A")
+
+        # Confirm operation
         if auto_confirm:
             click.echo("\n[Auto-confirmed]")
             confirmed = True
         else:
             click.echo()
             confirmed = click.confirm(
-                "Delete this file from Folder B?", default=False
+                "Replace copy with hardlink?", default=False
             )
 
         if confirmed:
             try:
+                # Delete the copy in folder B
                 folder_b_path.unlink()
-                files_deleted += 1
+
+                # Create hardlink from B to A
+                folder_b_path.hardlink_to(source_path)
+
+                files_fixed += 1
                 space_freed += folder_b_size
+                hardlinks_created += 1
+
                 click.echo(
-                    click.style("✓ Deleted successfully", fg="green")
+                    click.style(
+                        "✓ Replaced copy with hardlink successfully", fg="green"
+                    )
                 )
             except Exception as e:
                 click.echo(
-                    click.style(f"✗ Error deleting: {e}", fg="red")
+                    click.style(f"✗ Error: {e}", fg="red")
                 )
         else:
             click.echo(click.style("Skipped", fg="yellow"))
 
-    return (files_deleted, space_freed)
+    return (files_fixed, space_freed, hardlinks_created)
 
 
 @click.command()
@@ -264,12 +294,12 @@ def fix_duplicates(
 @click.option(
     "--fix",
     is_flag=True,
-    help="Remove duplicate copies from Folder B/destination",
+    help="Replace copies in Folder B with hardlinks to Folder A",
 )
 @click.option(
     "--confirm",
     is_flag=True,
-    help="Auto-confirm all deletions (use with --fix)",
+    help="Auto-confirm all operations (use with --fix)",
 )
 def main(
     folder_a: Path,
@@ -306,14 +336,17 @@ def main(
 
     # If in fix mode, process immediately
     if fix:
-        files_deleted, space_freed = fix_duplicates(groups, auto_confirm=confirm)
+        files_fixed, space_freed, hardlinks_created = fix_duplicates(
+            groups, auto_confirm=confirm
+        )
 
         # Display final summary
         click.echo()
         click.echo("=" * 60)
         click.echo("FIX SUMMARY")
         click.echo("=" * 60)
-        click.echo(f"Files deleted: {files_deleted}")
+        click.echo(f"Files fixed: {files_fixed}")
+        click.echo(f"Hardlinks created: {hardlinks_created}")
         click.echo(f"Space freed: {format_size(space_freed)}")
         return
 

@@ -70,17 +70,20 @@ class TestFixDuplicates:
             wasted_space=0,
         )
 
-        files_deleted, space_freed = fix_duplicates([group], auto_confirm=False)
+        files_fixed, space_freed, hardlinks_created = fix_duplicates(
+            [group], auto_confirm=False
+        )
 
-        assert files_deleted == 0
+        assert files_fixed == 0
         assert space_freed == 0
+        assert hardlinks_created == 0
 
         captured = capsys.readouterr()
         assert "No duplicate copies found to fix" in captured.out
 
-    def test_auto_confirm_deletes_copies(self, temp_dir):
-        """Test that auto-confirm mode deletes files without prompting."""
-        # Create real files for testing deletion
+    def test_auto_confirm_replaces_with_hardlink(self, temp_dir):
+        """Test that auto-confirm mode replaces copies with hardlinks."""
+        # Create real files for testing
         folder_a = temp_dir / "folder_a"
         folder_b = temp_dir / "folder_b"
         folder_a.mkdir()
@@ -118,23 +121,28 @@ class TestFixDuplicates:
             wasted_space=2000,
         )
 
-        # Before fix, both files exist
+        # Before fix, both files exist and are NOT hardlinked
         assert file_a_path.exists()
         assert file_b_path.exists()
+        assert file_a_path.stat().st_ino != file_b_path.stat().st_ino
 
         # Run fix with auto-confirm
-        files_deleted, space_freed = fix_duplicates([group], auto_confirm=True)
+        files_fixed, space_freed, hardlinks_created = fix_duplicates(
+            [group], auto_confirm=True
+        )
 
         # Check results
-        assert files_deleted == 1
+        assert files_fixed == 1
         assert space_freed == 2000
+        assert hardlinks_created == 1
 
-        # File A should still exist, File B should be deleted
+        # Both files should exist and now be hardlinked
         assert file_a_path.exists()
-        assert not file_b_path.exists()
+        assert file_b_path.exists()
+        assert file_a_path.stat().st_ino == file_b_path.stat().st_ino
 
     def test_interactive_mode_with_confirmation(self, temp_dir):
-        """Test interactive mode when user confirms deletion."""
+        """Test interactive mode when user confirms replacement."""
         folder_a = temp_dir / "folder_a"
         folder_b = temp_dir / "folder_b"
         folder_a.mkdir()
@@ -172,15 +180,19 @@ class TestFixDuplicates:
 
         # Mock click.confirm to return True (user confirms)
         with patch("find_duplicates.click.confirm", return_value=True):
-            files_deleted, space_freed = fix_duplicates([group], auto_confirm=False)
+            files_fixed, space_freed, hardlinks_created = fix_duplicates(
+                [group], auto_confirm=False
+            )
 
-        assert files_deleted == 1
+        assert files_fixed == 1
         assert space_freed == 1500
+        assert hardlinks_created == 1
         assert file_a_path.exists()
-        assert not file_b_path.exists()
+        assert file_b_path.exists()
+        assert file_a_path.stat().st_ino == file_b_path.stat().st_ino
 
     def test_interactive_mode_with_rejection(self, temp_dir):
-        """Test interactive mode when user rejects deletion."""
+        """Test interactive mode when user rejects replacement."""
         folder_a = temp_dir / "folder_a"
         folder_b = temp_dir / "folder_b"
         folder_a.mkdir()
@@ -216,15 +228,25 @@ class TestFixDuplicates:
             wasted_space=1000,
         )
 
+        # Store original inodes
+        orig_ino_a = file_a_path.stat().st_ino
+        orig_ino_b = file_b_path.stat().st_ino
+
         # Mock click.confirm to return False (user rejects)
         with patch("find_duplicates.click.confirm", return_value=False):
-            files_deleted, space_freed = fix_duplicates([group], auto_confirm=False)
+            files_fixed, space_freed, hardlinks_created = fix_duplicates(
+                [group], auto_confirm=False
+            )
 
-        # Nothing should be deleted
-        assert files_deleted == 0
+        # Nothing should be changed
+        assert files_fixed == 0
         assert space_freed == 0
+        assert hardlinks_created == 0
         assert file_a_path.exists()
         assert file_b_path.exists()
+        # Inodes should be unchanged (still not hardlinked)
+        assert file_a_path.stat().st_ino == orig_ino_a
+        assert file_b_path.stat().st_ino == orig_ino_b
 
     def test_multiple_groups_mixed_decisions(self, temp_dir):
         """Test processing multiple groups with mixed user decisions."""
@@ -274,17 +296,30 @@ class TestFixDuplicates:
 
         # Mock user confirming first, rejecting second
         with patch("find_duplicates.click.confirm", side_effect=[True, False]):
-            files_deleted, space_freed = fix_duplicates(groups, auto_confirm=False)
+            files_fixed, space_freed, hardlinks_created = fix_duplicates(
+                groups, auto_confirm=False
+            )
 
-        assert files_deleted == 1
+        assert files_fixed == 1
         assert space_freed == 1000
+        assert hardlinks_created == 1
 
-        # First group's file B deleted, second group's file B kept
-        assert not (folder_b / "GROUP1-111.mp4").exists()
-        assert (folder_b / "GROUP2-222.mp4").exists()
+        # First group's files should now be hardlinked
+        file1_a = folder_a / "GROUP1-111.mp4"
+        file1_b = folder_b / "GROUP1-111.mp4"
+        assert file1_a.exists()
+        assert file1_b.exists()
+        assert file1_a.stat().st_ino == file1_b.stat().st_ino
 
-    def test_deletion_error_handling(self, temp_dir, capsys):
-        """Test handling of deletion errors."""
+        # Second group's files should still be separate copies
+        file2_a = folder_a / "GROUP2-222.mp4"
+        file2_b = folder_b / "GROUP2-222.mp4"
+        assert file2_a.exists()
+        assert file2_b.exists()
+        assert file2_a.stat().st_ino != file2_b.stat().st_ino
+
+    def test_error_handling(self, temp_dir, capsys):
+        """Test handling of errors during hardlink creation."""
         folder_a = temp_dir / "folder_a"
         folder_b = temp_dir / "folder_b"
         folder_a.mkdir()
@@ -329,14 +364,17 @@ class TestFixDuplicates:
             return original_unlink(self, *args, **kwargs)
 
         with patch.object(Path, "unlink", mock_unlink):
-            files_deleted, space_freed = fix_duplicates([group], auto_confirm=True)
+            files_fixed, space_freed, hardlinks_created = fix_duplicates(
+                [group], auto_confirm=True
+            )
 
         # Should handle error gracefully
-        assert files_deleted == 0
+        assert files_fixed == 0
         assert space_freed == 0
+        assert hardlinks_created == 0
 
         captured = capsys.readouterr()
-        assert "Error deleting" in captured.out
+        assert "Error" in captured.out
 
     def test_skips_hardlink_groups(self, temp_dir, capsys):
         """Test that hardlink-only groups are skipped."""
@@ -377,13 +415,14 @@ class TestFixDuplicates:
             wasted_space=0,
         )
 
-        files_deleted, space_freed = fix_duplicates(
+        files_fixed, space_freed, hardlinks_created = fix_duplicates(
             [hardlink_group], auto_confirm=True
         )
 
-        # No files should be deleted
-        assert files_deleted == 0
+        # No files should be changed
+        assert files_fixed == 0
         assert space_freed == 0
+        assert hardlinks_created == 0
         assert original.exists()
         assert hardlink.exists()
 
