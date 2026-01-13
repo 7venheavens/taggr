@@ -537,6 +537,62 @@ class TestFixDuplicates:
         assert "different content" in captured.out.lower()
         assert "skipping" in captured.out.lower()
 
+    def test_skips_files_with_different_sizes(self, temp_dir, capsys):
+        """Test that files with different sizes are always skipped."""
+        folder_a = temp_dir / "folder_a"
+        folder_b = temp_dir / "folder_b"
+        folder_a.mkdir()
+        folder_b.mkdir()
+
+        # Create files with DIFFERENT sizes
+        file_a_path = folder_a / "SIZE-789.mp4"
+        file_b_path = folder_b / "SIZE-789.mp4"
+        file_a_path.write_bytes(b"x" * 1000)  # 1000 bytes
+        file_b_path.write_bytes(b"x" * 2000)  # 2000 bytes
+
+        file_a = VideoFile(
+            file_path=file_a_path,
+            folder_name="folder_a",
+            file_name="SIZE-789.mp4",
+            file_size=1000,
+        )
+        file_b = VideoFile(
+            file_path=file_b_path,
+            folder_name="folder_b",
+            file_name="SIZE-789.mp4",
+            file_size=2000,
+        )
+
+        group = DuplicateGroup(
+            video_id="SIZE789",
+            confidence=0.9,
+            source_type=SourceType.DMM,
+            folder_a_files=[file_a],
+            folder_b_file=file_b,
+            hardlink_pairs=[],
+            copy_pairs=[(file_a, file_b)],
+            total_size=1000,
+            wasted_space=1000,
+        )
+
+        # Run without verify_hash - should still be caught by size check
+        files_fixed, space_freed, hardlinks_created = fix_duplicates(
+            [group], auto_confirm=True, verify_hash=False
+        )
+
+        # No files should be modified due to size mismatch
+        assert files_fixed == 0
+        assert space_freed == 0
+        assert hardlinks_created == 0
+
+        # Files should remain unchanged
+        assert file_a_path.stat().st_ino != file_b_path.stat().st_ino
+
+        # Should have size mismatch warning
+        captured = capsys.readouterr()
+        assert "different sizes" in captured.out.lower()
+        assert "skipping" in captured.out.lower()
+
     def test_skip_hash_verification_when_disabled(self, temp_dir, capsys):
         """Test that hash verification is skipped when verify_hash=False."""
         folder_a = temp_dir / "folder_a"

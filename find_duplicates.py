@@ -186,11 +186,13 @@ def fix_duplicates(
 
     Folder A is the source (for seeding torrents), Folder B is the organized
     library. For any files that are true copies (not hardlinked), this function:
-    1. Optionally verifies files are identical using SHA256 hashing
-    2. Deletes the copy in Folder B
-    3. Creates a hardlink from B to A (saves space while maintaining both)
+    1. Checks file sizes match (fast, always performed)
+    2. Optionally verifies files are identical using SHA256 hashing
+    3. Deletes the copy in Folder B
+    4. Creates a hardlink from B to A (saves space while maintaining both)
 
     Hardlinked files are already optimal and are skipped.
+    Files with mismatched sizes are always skipped for safety.
     Files with mismatched hashes are skipped for safety (if verify_hash is enabled).
 
     Args:
@@ -254,6 +256,28 @@ def fix_duplicates(
             continue
 
         source_path = source_file.file_path
+
+        # Always check file sizes first (fast check)
+        try:
+            size_a = source_path.stat().st_size
+            size_b = folder_b_path.stat().st_size
+
+            if size_a != size_b:
+                click.echo(
+                    click.style(
+                        "⚠ WARNING: Files have different sizes! Skipping for safety.",
+                        fg="red",
+                        bold=True,
+                    )
+                )
+                click.echo(f"  Source size: {format_size(size_a)}")
+                click.echo(f"  Dest size:   {format_size(size_b)}")
+                continue
+        except Exception as e:
+            click.echo(
+                click.style(f"✗ Error checking file sizes: {e}", fg="red")
+            )
+            continue
 
         # Verify files are identical by comparing hashes (if enabled)
         if verify_hash:
