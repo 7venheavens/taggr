@@ -34,7 +34,7 @@ Examples:
     python find_duplicates.py /media/original /media/organized --fix --confirm
 
 Options:
-    --min-confidence FLOAT  Minimum ID extraction confidence (0.0-1.0) [default: 0.5]
+    --min-confidence FLOAT  Minimum ID extraction confidence (0.0-1.0) [default: 0.75]
     --content-match         Also match by file size + SHA256 hash
     --show-hardlinks-only   Show only hardlinked files
     --show-copies-only      Show only true copy files (wasting space)
@@ -459,7 +459,7 @@ def fix_duplicates(
 )
 @click.option(
     "--min-confidence",
-    default=0.5,
+    default=0.75,
     type=float,
     help="Minimum ID extraction confidence (0.0-1.0)",
 )
