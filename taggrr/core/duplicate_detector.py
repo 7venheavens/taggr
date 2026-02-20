@@ -1,6 +1,7 @@
 """Duplicate video file detection across multiple folders."""
 
 import hashlib
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -103,6 +104,13 @@ def compute_hash(file_path: Path, chunk_size: int = 8192) -> str:
 class DuplicateDetector:
     """Detects duplicate video files across a source dir and multiple target dirs."""
 
+    _PART_PATTERNS = [
+        re.compile(r"(?i)(?:pt|part|cd|disc)[\s._-]*([0-9]+|[a-d])(?:\b|$)"),
+        re.compile(r"(?i)[-_]([0-9]+|[a-d])$"),
+        re.compile(r"(?i)(?<=\d)([a-d])$"),
+    ]
+    _OPTION_PATTERN = re.compile(r"(?i)(?:^|[-_\s])option$")
+
     def __init__(self) -> None:
         self.scanner = VideoScanner()
         self.id_extractor = IDExtractor()
@@ -144,8 +152,10 @@ class DuplicateDetector:
         source_dir_r = source_dir.resolve()
 
         # 2. Build id_maps per directory
-        # id_map: normalized_id -> list of (VideoFile, confidence, source_type)
-        id_maps: dict[Path, dict[str, list[tuple[VideoFile, float, SourceType]]]] = {
+        # id_map: (normalized_id, part_token) -> list of entries
+        id_maps: dict[
+            Path, dict[tuple[str, str | None], list[tuple[VideoFile, float, SourceType]]]
+        ] = {
             d: self._build_id_map(files, min_confidence)
             for d, files in files_by_dir.items()
         }
@@ -157,14 +167,15 @@ class DuplicateDetector:
         source_id_map = id_maps[source_dir_r]
         name_sets: list[DuplicateSet] = []
 
-        for video_id, source_entries in source_id_map.items():
+        for match_key, source_entries in source_id_map.items():
+            video_id, part_token = match_key
             # Collect matching entries from every dir that has this ID
             dir_entries: dict[Path, list[tuple[VideoFile, float, SourceType]]] = {
                 source_dir_r: source_entries
             }
             for d in [d.resolve() for d in target_dirs]:
-                if video_id in id_maps[d]:
-                    dir_entries[d] = id_maps[d][video_id]
+                if match_key in id_maps[d]:
+                    dir_entries[d] = id_maps[d][match_key]
 
             if len(dir_entries) < 2:
                 # ID only in source; not a duplicate
@@ -185,13 +196,18 @@ class DuplicateDetector:
 
             dup_set = self._build_set(
                 match_type="name",
-                video_id=video_id,
+                video_id=(
+                    f"{video_id} [{part_token}]"
+                    if part_token is not None
+                    else video_id
+                ),
                 confidence=confidence,
                 source_type=src_type,
                 file_size=None,
                 file_hash=None,
                 files_by_dir=set_files_by_dir,
                 source_file=source_file,
+                source_dir=source_dir_r,
             )
             name_sets.append(dup_set)
 
@@ -256,26 +272,48 @@ class DuplicateDetector:
         self,
         files: list[VideoFile],
         min_confidence: float,
-    ) -> dict[str, list[tuple[VideoFile, float, SourceType]]]:
+    ) -> dict[tuple[str, str | None], list[tuple[VideoFile, float, SourceType]]]:
         """
-        Build normalized_id -> [(VideoFile, confidence, source_type)] map.
+        Build (normalized_id, part_token) -> entries map.
 
         Only the best match above min_confidence is used per file.
         """
-        id_map: dict[str, list[tuple[VideoFile, float, SourceType]]] = {}
+        id_map: dict[
+            tuple[str, str | None], list[tuple[VideoFile, float, SourceType]]
+        ] = {}
         for video_file in files:
-            text = f"{video_file.folder_name} {video_file.file_name}"
-            ids = self.id_extractor.extract_ids(text)
+            # Use filename-only extraction for duplicate matching.
+            # Folder-derived IDs can incorrectly pull in unrelated sidecar files.
+            ids = self.id_extractor.extract_ids(video_file.file_name)
             if not ids:
                 continue
             video_id, src_type, confidence = ids[0]
             if confidence < min_confidence:
                 continue
             normalized = self._normalize_id(video_id)
-            id_map.setdefault(normalized, []).append(
+            part_token = self._extract_part_token(video_file.file_name)
+            id_map.setdefault((normalized, part_token), []).append(
                 (video_file, confidence, src_type)
             )
         return id_map
+
+    def _extract_part_token(self, file_name: str) -> str | None:
+        """Extract normalized part token from filename."""
+        stem = Path(file_name).stem
+
+        if self._OPTION_PATTERN.search(stem):
+            return "OPTION"
+
+        for pattern in self._PART_PATTERNS:
+            match = pattern.search(stem)
+            if not match:
+                continue
+            token = match.group(1).upper()
+            if token.isdigit():
+                return str(int(token))
+            return token
+
+        return None
 
     def _normalize_id(self, video_id: str) -> str:
         """Normalize video ID for consistent cross-source matching.
@@ -296,13 +334,16 @@ class DuplicateDetector:
         file_hash: str | None,
         files_by_dir: dict[Path, list[VideoFile]],
         source_file: VideoFile | None,
+        source_dir: Path | None,
     ) -> DuplicateSet:
         """Create a DuplicateSet and populate hardlink/copy pairs."""
         hardlink_pairs: list[tuple[VideoFile, VideoFile]] = []
         copy_pairs: list[tuple[VideoFile, VideoFile]] = []
 
         if source_file is not None:
-            for files in files_by_dir.values():
+            for group_dir, files in files_by_dir.items():
+                if source_dir is not None and group_dir == source_dir:
+                    continue
                 for f in files:
                     if f.file_path == source_file.file_path:
                         continue
@@ -399,6 +440,7 @@ class DuplicateDetector:
                     file_hash=file_hash,
                     files_by_dir=set_files_by_dir,
                     source_file=source_file,
+                    source_dir=source_dir,
                 )
                 sets.append(dup_set)
 

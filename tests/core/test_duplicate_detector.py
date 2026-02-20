@@ -382,6 +382,65 @@ class TestContentMatching:
         assert len(no_source) >= 1
 
 
+class TestPartAwareMatching:
+    """Part-aware duplicate grouping by filename suffixes."""
+
+    def test_numeric_parts_match_pt_variants(self, temp_dir):
+        source = temp_dir / "source"
+        target = temp_dir / "target"
+        source.mkdir()
+        target.mkdir()
+
+        for part in (1, 2, 3, 4):
+            (source / f"vrkm-646-{part}.mp4").write_bytes(f"src-{part}".encode())
+            (target / f"VRKM-646-pt{part}.mp4").write_bytes(f"tgt-{part}".encode())
+
+        sets = DuplicateDetector().scan_multiple(source, [target])
+        assert len(sets) == 4
+        assert all(s.video_id and "VRKM646" in s.video_id for s in sets)
+
+    def test_letter_suffix_parts_supported(self, temp_dir):
+        source = temp_dir / "source"
+        target = temp_dir / "target"
+        source.mkdir()
+        target.mkdir()
+
+        (source / "ABC-123-A.mp4").write_bytes(b"a-src")
+        (target / "ABC-123_A.mp4").write_bytes(b"a-tgt")
+        (source / "ABC-123-B.mp4").write_bytes(b"b-src")
+        (target / "ABC-123_B.mp4").write_bytes(b"b-tgt")
+
+        sets = DuplicateDetector().scan_multiple(source, [target])
+        assert len(sets) == 2
+        ids = sorted(s.video_id for s in sets)
+        assert ids == ["ABC123 [A]", "ABC123 [B]"]
+
+    def test_option_suffix_supported(self, temp_dir):
+        source = temp_dir / "source"
+        target = temp_dir / "target"
+        source.mkdir()
+        target.mkdir()
+
+        (source / "ABC-123-option.mp4").write_bytes(b"src")
+        (target / "ABC-123_option.mp4").write_bytes(b"tgt")
+
+        sets = DuplicateDetector().scan_multiple(source, [target])
+        assert len(sets) == 1
+        assert sets[0].video_id == "ABC123 [OPTION]"
+
+    def test_folder_id_does_not_pull_unrelated_file(self, temp_dir):
+        source = temp_dir / "source" / "VRKM-646"
+        target = temp_dir / "target"
+        source.mkdir(parents=True)
+        target.mkdir()
+
+        (source / "promo clip.mp4").write_bytes(b"noise")
+        (target / "VRKM-646-pt1.mp4").write_bytes(b"video")
+
+        sets = DuplicateDetector().scan_multiple(source.parent, [target])
+        assert len(sets) == 0
+
+
 class TestUnmatchedFiles:
     """Utility for retrieving files not included in any duplicate set."""
 

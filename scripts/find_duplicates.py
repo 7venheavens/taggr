@@ -236,6 +236,7 @@ def export_json(
 
 def fix_duplicates(
     groups: list[DuplicateSet],
+    source_dir: Path | None = None,
     auto_confirm: bool = False,
 ) -> tuple[int, int]:
     """
@@ -249,6 +250,8 @@ def fix_duplicates(
 
     Args:
         groups: List of duplicate sets to process.
+        source_dir: Authoritative source root; never modify files under it.
+            If None, it is inferred from group source files.
         auto_confirm: If True, skip per-group confirmation prompts.
 
     Returns:
@@ -256,6 +259,16 @@ def fix_duplicates(
     """
     files_fixed = 0
     space_freed = 0
+
+    source_roots: set[Path] = set()
+    if source_dir is not None:
+        source_roots.add(source_dir.resolve())
+    else:
+        source_roots = {
+            g.source_file.file_path.parent.resolve()
+            for g in groups
+            if g.source_file is not None
+        }
 
     copy_groups = [g for g in groups if g.has_copies and g.source_file is not None]
     skipped_no_source = sum(1 for g in groups if g.status == "NO_SOURCE")
@@ -302,6 +315,16 @@ def fix_duplicates(
         for _src, copy_file in group.copy_pairs:
             copy_path = copy_file.file_path
             copy_size = copy_file.file_size or 0
+
+            if any(copy_path.resolve().is_relative_to(root) for root in source_roots):
+                click.echo(
+                    click.style(
+                        f"  ⚠ Refusing to modify source file: {copy_path}",
+                        fg="yellow",
+                        bold=True,
+                    )
+                )
+                continue
 
             # Size check
             try:
@@ -462,7 +485,9 @@ def main(
                 click.echo("Aborted.")
                 return
 
-        files_fixed, space_freed = fix_duplicates(groups, auto_confirm=confirm)
+        files_fixed, space_freed = fix_duplicates(
+            groups, source_dir=source, auto_confirm=confirm
+        )
 
         click.echo()
         click.echo("=" * 60)
