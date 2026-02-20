@@ -61,6 +61,8 @@ import click
 
 from taggrr.core.duplicate_detector import DuplicateDetector, DuplicateSet
 
+MIN_DUP_FILE_SIZE_BYTES = 100 * 1024 * 1024
+
 
 def format_size(bytes_count: int) -> str:
     """Format bytes as human-readable size."""
@@ -438,6 +440,7 @@ def main(
     for d in target_dirs:
         click.echo(f"Target:          {d}")
     click.echo(f"Min confidence:  {min_confidence}")
+    click.echo(f"Min file size:   {format_size(MIN_DUP_FILE_SIZE_BYTES)}")
     click.echo(f"Content match:   {'yes' if content_match else 'no'}")
     if fix:
         mode = "FIX (auto-confirm)" if confirm else "FIX (interactive)"
@@ -452,6 +455,7 @@ def main(
         target_dirs,
         min_confidence=min_confidence,
         content_match=content_match,
+        min_file_size_bytes=MIN_DUP_FILE_SIZE_BYTES,
     )
 
     # Always show groups and summary first (even in fix mode).

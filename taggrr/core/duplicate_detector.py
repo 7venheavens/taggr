@@ -125,6 +125,7 @@ class DuplicateDetector:
         target_dirs: list[Path],
         min_confidence: float = 0.5,
         content_match: bool = False,
+        min_file_size_bytes: int = 0,
     ) -> list[DuplicateSet]:
         """
         Scan source + target directories and build duplicate sets.
@@ -139,6 +140,7 @@ class DuplicateDetector:
             target_dirs: One or more directories to compare against.
             min_confidence: Minimum ID extraction confidence for name matching.
             content_match: If True, also match files by size + SHA256 hash.
+            min_file_size_bytes: Ignore files smaller than this size.
 
         Returns:
             Sorted list of DuplicateSet objects.
@@ -149,6 +151,15 @@ class DuplicateDetector:
         files_by_dir: dict[Path, list[VideoFile]] = {
             d.resolve(): self.scanner.scan_directory(d) for d in all_dirs
         }
+        if min_file_size_bytes > 0:
+            files_by_dir = {
+                d: [
+                    f
+                    for f in files
+                    if f.file_size is not None and f.file_size >= min_file_size_bytes
+                ]
+                for d, files in files_by_dir.items()
+            }
         source_dir_r = source_dir.resolve()
 
         # 2. Build id_maps per directory
