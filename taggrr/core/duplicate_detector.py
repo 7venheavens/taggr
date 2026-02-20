@@ -1,5 +1,6 @@
-"""Duplicate video file detection across folders."""
+"""Duplicate video file detection across multiple folders."""
 
+import hashlib
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -9,238 +10,403 @@ from taggrr.core.scanner import VideoScanner
 
 
 @dataclass
-class DuplicateGroup:
-    """Group of duplicate video files across two folders."""
+class DuplicateSet:
+    """Group of duplicate video files across one or more directories."""
 
-    video_id: str  # Extracted ID (e.g., "FC2-PPV-1234567", "ABC-123")
-    confidence: float  # ID extraction confidence (0.0-1.0)
-    source_type: SourceType  # FC2, DMM, or GENERIC
+    match_type: str  # "name", "content", or "name+content"
 
-    # Files grouped by folder
-    folder_a_files: list[VideoFile]  # One or more matches in Folder A
-    folder_b_file: VideoFile  # Single match in Folder B (per requirement)
+    # Name match fields (None for content-only sets)
+    video_id: str | None
+    confidence: float | None
+    source_type: SourceType | None
 
-    # Hardlink analysis results
-    hardlink_pairs: list[tuple[VideoFile, VideoFile]] = field(
-        default_factory=list
-    )  # (A, B) pairs that are hardlinked
-    copy_pairs: list[tuple[VideoFile, VideoFile]] = field(
-        default_factory=list
-    )  # (A, B) pairs that are true copies
+    # Content match fields (None for name-only sets)
+    file_size: int | None
+    file_hash: str | None  # SHA256; populated when content_match is used
 
-    # Space calculations
-    total_size: int = 0  # Total bytes across all files
-    wasted_space: int = 0  # Bytes wasted by true copies (excludes hardlinks)
+    # Files grouped by their resolved parent directory
+    files_by_dir: dict[Path, list[VideoFile]]
+
+    # The canonical source file (from the source dir); None if source has no file here
+    source_file: VideoFile | None
+
+    # Hardlink/copy analysis: (source_file, other_file) pairs
+    hardlink_pairs: list[tuple[VideoFile, VideoFile]] = field(default_factory=list)
+    copy_pairs: list[tuple[VideoFile, VideoFile]] = field(default_factory=list)
+
+    wasted_space: int = 0  # Sum of copy file sizes (non-source copies only)
+
+    @property
+    def all_files(self) -> list[VideoFile]:
+        """Flat list of all files across all directories."""
+        return [f for files in self.files_by_dir.values() for f in files]
 
     @property
     def has_hardlinks(self) -> bool:
-        """Check if any files are hardlinked."""
         return len(self.hardlink_pairs) > 0
 
     @property
     def has_copies(self) -> bool:
-        """Check if any files are true duplicates."""
         return len(self.copy_pairs) > 0
 
     @property
     def status(self) -> str:
-        """Return 'HARDLINK', 'COPY', or 'MIXED'."""
+        """Return 'HARDLINK', 'COPY', 'MIXED', or 'NO_SOURCE'."""
+        if self.source_file is None:
+            return "NO_SOURCE"
         if self.has_hardlinks and not self.has_copies:
             return "HARDLINK"
-        elif self.has_copies and not self.has_hardlinks:
+        if self.has_copies and not self.has_hardlinks:
             return "COPY"
-        else:
-            return "MIXED"
+        return "MIXED"
 
 
 def are_hardlinks(path1: Path, path2: Path) -> bool:
     """
-    Check if two paths are hardlinks to the same inode.
+    Check if two paths point to the same underlying file (hardlinks).
 
-    Uses st_dev (device) and st_ino (inode) comparison.
-    Works reliably on Linux + NFS environments.
+    Uses Path.samefile() which is cross-platform: on Windows it uses the
+    Win32 file-ID API (GetFileInformationByHandle), on POSIX it compares
+    st_dev + st_ino.
 
     Args:
         path1: First file path
         path2: Second file path
 
     Returns:
-        True if both paths point to same inode on same device
+        True if both paths refer to the same file
     """
     try:
-        stat1 = path1.stat()
-        stat2 = path2.stat()
-
-        # Must match both device AND inode
-        # NFS preserves inode numbers within same filesystem
-        return stat1.st_dev == stat2.st_dev and stat1.st_ino == stat2.st_ino
-    except (OSError, FileNotFoundError):
-        # Handle NFS stale handles or missing files
+        return path1.samefile(path2)
+    except OSError:
         return False
 
 
+def compute_hash(file_path: Path, chunk_size: int = 8192) -> str:
+    """
+    Calculate SHA256 hash of a file.
+
+    Args:
+        file_path: Path to the file
+        chunk_size: Read chunk size in bytes
+
+    Returns:
+        Hexadecimal SHA256 digest string
+    """
+    sha256 = hashlib.sha256()
+    with open(file_path, "rb") as f:
+        while chunk := f.read(chunk_size):
+            sha256.update(chunk)
+    return sha256.hexdigest()
+
+
 class DuplicateDetector:
-    """Detects duplicate video files across two folders using ID extraction."""
+    """Detects duplicate video files across a source dir and multiple target dirs."""
 
     def __init__(self) -> None:
-        """Initialize detector with scanner and ID extractor."""
         self.scanner = VideoScanner()
         self.id_extractor = IDExtractor()
 
-    def scan_folders(
-        self, folder_a: Path, folder_b: Path, min_confidence: float = 0.5
-    ) -> list[DuplicateGroup]:
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def scan_multiple(
+        self,
+        source_dir: Path,
+        target_dirs: list[Path],
+        min_confidence: float = 0.5,
+        content_match: bool = False,
+    ) -> list[DuplicateSet]:
         """
-        Scan two folders and identify duplicate videos by ID matching.
+        Scan source + target directories and build duplicate sets.
+
+        A duplicate set groups files that share the same normalized video ID
+        (name match) and/or the same SHA256 hash (content match). Each set
+        carries a source_file pointer to the canonical copy in source_dir
+        (or None if source has no representative in that set).
 
         Args:
-            folder_a: Original video folder
-            folder_b: Reorganized video folder
-            min_confidence: Minimum ID extraction confidence (default: 0.5)
+            source_dir: The authoritative directory (files here are kept on fix).
+            target_dirs: One or more directories to compare against.
+            min_confidence: Minimum ID extraction confidence for name matching.
+            content_match: If True, also match files by size + SHA256 hash.
 
         Returns:
-            List of DuplicateGroup objects with hardlink analysis
+            Sorted list of DuplicateSet objects.
         """
-        # 1. Scan both folders
-        files_a = self.scanner.scan_directory(folder_a)
-        files_b = self.scanner.scan_directory(folder_b)
+        all_dirs = [source_dir] + list(target_dirs)
 
-        # 2. Extract IDs from all files
-        id_map_a = self._build_id_map(files_a, min_confidence)
-        id_map_b = self._build_id_map(files_b, min_confidence)
+        # 1. Scan all directories
+        files_by_dir: dict[Path, list[VideoFile]] = {
+            d.resolve(): self.scanner.scan_directory(d) for d in all_dirs
+        }
+        source_dir_r = source_dir.resolve()
 
-        # 3. Find common IDs
-        common_ids = set(id_map_a.keys()) & set(id_map_b.keys())
+        # 2. Build id_maps per directory
+        # id_map: normalized_id -> list of (VideoFile, confidence, source_type)
+        id_maps: dict[Path, dict[str, list[tuple[VideoFile, float, SourceType]]]] = {
+            d: self._build_id_map(files, min_confidence)
+            for d, files in files_by_dir.items()
+        }
 
-        # 4. Create duplicate groups
-        groups = []
-        for video_id in common_ids:
-            group = self._create_group(
-                video_id,
-                id_map_a[video_id],  # List of files from A
-                id_map_b[video_id],  # Files from B
+        # Track which files have been placed into a name-based set
+        matched_paths: set[Path] = set()
+
+        # 3. Find IDs present in source AND at least one target
+        source_id_map = id_maps[source_dir_r]
+        name_sets: list[DuplicateSet] = []
+
+        for video_id, source_entries in source_id_map.items():
+            # Collect matching entries from every dir that has this ID
+            dir_entries: dict[Path, list[tuple[VideoFile, float, SourceType]]] = {
+                source_dir_r: source_entries
+            }
+            for d in [d.resolve() for d in target_dirs]:
+                if video_id in id_maps[d]:
+                    dir_entries[d] = id_maps[d][video_id]
+
+            if len(dir_entries) < 2:
+                # ID only in source; not a duplicate
+                continue
+
+            # Gather VideoFile objects per dir
+            set_files_by_dir: dict[Path, list[VideoFile]] = {
+                d: [e[0] for e in entries] for d, entries in dir_entries.items()
+            }
+            confidence = source_entries[0][1]
+            src_type = source_entries[0][2]
+            source_file = source_entries[0][0]
+
+            # Track matched paths
+            for files in set_files_by_dir.values():
+                for f in files:
+                    matched_paths.add(f.file_path)
+
+            dup_set = self._build_set(
+                match_type="name",
+                video_id=video_id,
+                confidence=confidence,
+                source_type=src_type,
+                file_size=None,
+                file_hash=None,
+                files_by_dir=set_files_by_dir,
+                source_file=source_file,
             )
-            groups.append(group)
+            name_sets.append(dup_set)
 
-        return groups
+        # 4. Optionally annotate name sets with content confirmation
+        #    and find content-only duplicates
+        content_sets: list[DuplicateSet] = []
+
+        if content_match:
+            # Annotate name sets: check if files also match by size + hash
+            for dup_set in name_sets:
+                if dup_set.source_file is None:
+                    continue
+                source_size = dup_set.source_file.file_size
+                # Check all non-source files against source size
+                all_same_size = all(
+                    f.file_size == source_size
+                    for files in dup_set.files_by_dir.values()
+                    for f in files
+                    if f.file_path != dup_set.source_file.file_path
+                )
+                if all_same_size and source_size is not None:
+                    source_hash = compute_hash(dup_set.source_file.file_path)
+                    all_same_hash = all(
+                        compute_hash(f.file_path) == source_hash
+                        for files in dup_set.files_by_dir.values()
+                        for f in files
+                        if f.file_path != dup_set.source_file.file_path
+                    )
+                    if all_same_hash:
+                        dup_set.match_type = "name+content"
+                        dup_set.file_size = source_size
+                        dup_set.file_hash = source_hash
+
+            # Find content-only duplicates from unmatched files
+            unmatched: list[VideoFile] = [
+                f
+                for files in files_by_dir.values()
+                for f in files
+                if f.file_path not in matched_paths
+            ]
+            content_sets = self._find_content_duplicates(
+                unmatched, files_by_dir, source_dir_r
+            )
+
+        all_sets = name_sets + content_sets
+
+        # 5. Sort: name/name+content by video_id, content-only by file_size
+        all_sets.sort(
+            key=lambda s: (
+                s.match_type == "content",  # name matches first
+                s.video_id or "",
+                s.file_size or 0,
+            )
+        )
+        return all_sets
+
+    # ------------------------------------------------------------------
+    # Private helpers
+    # ------------------------------------------------------------------
 
     def _build_id_map(
-        self, files: list[VideoFile], min_confidence: float
-    ) -> dict[str, list[VideoFile]]:
+        self,
+        files: list[VideoFile],
+        min_confidence: float,
+    ) -> dict[str, list[tuple[VideoFile, float, SourceType]]]:
         """
-        Build mapping of video_id -> list of VideoFile objects.
+        Build normalized_id -> [(VideoFile, confidence, source_type)] map.
 
-        Args:
-            files: List of video files to process
-            min_confidence: Minimum confidence threshold
-
-        Returns:
-            Dictionary mapping normalized video IDs to file lists
+        Only the best match above min_confidence is used per file.
         """
-        id_map: dict[str, list[VideoFile]] = {}
-
+        id_map: dict[str, list[tuple[VideoFile, float, SourceType]]] = {}
         for video_file in files:
-            # Extract IDs from both filename and folder name
             text = f"{video_file.folder_name} {video_file.file_name}"
             ids = self.id_extractor.extract_ids(text)
-
-            # Use highest confidence match above threshold
-            if ids:
-                video_id, source_type, confidence = ids[0]  # Best match
-                if confidence >= min_confidence:
-                    # Normalize ID for comparison
-                    normalized_id = self._normalize_id(video_id, source_type)
-
-                    if normalized_id not in id_map:
-                        id_map[normalized_id] = []
-                    id_map[normalized_id].append(video_file)
-
+            if not ids:
+                continue
+            video_id, src_type, confidence = ids[0]
+            if confidence < min_confidence:
+                continue
+            normalized = self._normalize_id(video_id)
+            id_map.setdefault(normalized, []).append(
+                (video_file, confidence, src_type)
+            )
         return id_map
 
-    def _normalize_id(self, video_id: str, source_type: SourceType) -> str:
+    def _normalize_id(self, video_id: str) -> str:
+        """Normalize video ID for consistent cross-source matching.
+
+        Strips dashes and underscores and uppercases for all source types,
+        so MIDE-123 == MIDE123 == mide_123.
         """
-        Normalize video ID for consistent matching.
+        return video_id.upper().replace("-", "").replace("_", "")
 
-        Args:
-            video_id: Raw video ID
-            source_type: Type of source (FC2, DMM, etc.)
-
-        Returns:
-            Normalized ID string
-        """
-        # Uppercase for consistency
-        normalized = video_id.upper()
-
-        # Remove separators for FC2 (FC2-PPV-123456 -> FC2PPV123456)
-        if source_type == SourceType.FC2:
-            normalized = normalized.replace("-", "").replace("_", "")
-
-        return normalized
-
-    def _create_group(
+    def _build_set(
         self,
-        video_id: str,
-        files_a: list[VideoFile],
-        files_b: list[VideoFile],
-    ) -> DuplicateGroup:
-        """
-        Create a DuplicateGroup with hardlink analysis.
+        *,
+        match_type: str,
+        video_id: str | None,
+        confidence: float | None,
+        source_type: SourceType | None,
+        file_size: int | None,
+        file_hash: str | None,
+        files_by_dir: dict[Path, list[VideoFile]],
+        source_file: VideoFile | None,
+    ) -> DuplicateSet:
+        """Create a DuplicateSet and populate hardlink/copy pairs."""
+        hardlink_pairs: list[tuple[VideoFile, VideoFile]] = []
+        copy_pairs: list[tuple[VideoFile, VideoFile]] = []
 
-        Args:
-            video_id: Normalized video ID
-            files_a: Files from folder A
-            files_b: Files from folder B
+        if source_file is not None:
+            for files in files_by_dir.values():
+                for f in files:
+                    if f.file_path == source_file.file_path:
+                        continue
+                    if are_hardlinks(source_file.file_path, f.file_path):
+                        hardlink_pairs.append((source_file, f))
+                    else:
+                        copy_pairs.append((source_file, f))
 
-        Returns:
-            DuplicateGroup with complete analysis
-        """
-        # Per requirement: max 1 file in Folder B
-        folder_b_file = files_b[0]
+        # Wasted space = sum of non-source copy file sizes (the files we'd delete)
+        wasted_space = sum(f[1].file_size or 0 for f in copy_pairs)
 
-        # Analyze each Folder A file against Folder B file
-        hardlink_pairs = []
-        copy_pairs = []
-
-        for file_a in files_a:
-            if are_hardlinks(file_a.file_path, folder_b_file.file_path):
-                hardlink_pairs.append((file_a, folder_b_file))
-            else:
-                copy_pairs.append((file_a, folder_b_file))
-
-        # Calculate space usage
-        total_size = sum(f.file_size or 0 for f in files_a)
-        wasted_space = sum(f[0].file_size or 0 for f in copy_pairs)
-
-        # Get confidence and source from first file in A
-        first_file_text = f"{files_a[0].folder_name} {files_a[0].file_name}"
-        ids = self.id_extractor.extract_ids(first_file_text)
-        confidence = ids[0][2] if ids else 0.0
-        source_type = ids[0][1] if ids else SourceType.GENERIC
-
-        return DuplicateGroup(
+        return DuplicateSet(
+            match_type=match_type,
             video_id=video_id,
             confidence=confidence,
             source_type=source_type,
-            folder_a_files=files_a,
-            folder_b_file=folder_b_file,
+            file_size=file_size,
+            file_hash=file_hash,
+            files_by_dir=files_by_dir,
+            source_file=source_file,
             hardlink_pairs=hardlink_pairs,
             copy_pairs=copy_pairs,
-            total_size=total_size,
             wasted_space=wasted_space,
         )
+
+    def _find_content_duplicates(
+        self,
+        files: list[VideoFile],
+        files_by_dir: dict[Path, list[VideoFile]],
+        source_dir: Path,
+    ) -> list[DuplicateSet]:
+        """
+        Group unmatched files by size then hash to find content duplicates.
+
+        Only creates a DuplicateSet if files from at least 2 different dirs
+        share the same hash.
+        """
+        # Build a reverse map: file_path -> dir
+        path_to_dir: dict[Path, Path] = {}
+        for d, dir_files in files_by_dir.items():
+            for f in dir_files:
+                path_to_dir[f.file_path] = d
+
+        # Group by size
+        by_size: dict[int, list[VideoFile]] = {}
+        for f in files:
+            if f.file_size is not None:
+                by_size.setdefault(f.file_size, []).append(f)
+
+        sets: list[DuplicateSet] = []
+        for size, size_group in by_size.items():
+            if len(size_group) < 2:
+                continue
+            # Check that at least 2 different dirs are represented
+            dirs_in_group = {path_to_dir.get(f.file_path) for f in size_group}
+            if len(dirs_in_group) < 2:
+                continue
+
+            # Hash all files in this size group
+            hash_groups: dict[str, list[VideoFile]] = {}
+            for f in size_group:
+                try:
+                    h = compute_hash(f.file_path)
+                    hash_groups.setdefault(h, []).append(f)
+                except OSError:
+                    pass
+
+            for file_hash, hash_group in hash_groups.items():
+                if len(hash_group) < 2:
+                    continue
+                # Need at least 2 dirs
+                dirs_here = {path_to_dir.get(f.file_path) for f in hash_group}
+                if len(dirs_here) < 2:
+                    continue
+
+                # Build files_by_dir for this set
+                set_files_by_dir: dict[Path, list[VideoFile]] = {}
+                for f in hash_group:
+                    d = path_to_dir[f.file_path]
+                    set_files_by_dir.setdefault(d, []).append(f)
+
+                source_file = (
+                    set_files_by_dir[source_dir][0]
+                    if source_dir in set_files_by_dir
+                    else None
+                )
+
+                dup_set = self._build_set(
+                    match_type="content",
+                    video_id=None,
+                    confidence=None,
+                    source_type=None,
+                    file_size=size,
+                    file_hash=file_hash,
+                    files_by_dir=set_files_by_dir,
+                    source_file=source_file,
+                )
+                sets.append(dup_set)
+
+        return sets
 
 
 def get_unmatched_files(
     folder_files: list[VideoFile], matched_files: set[Path]
 ) -> list[VideoFile]:
-    """
-    Return files that weren't matched in duplicate detection.
-
-    Args:
-        folder_files: All files from a folder
-        matched_files: Set of paths that were matched
-
-    Returns:
-        List of unmatched VideoFile objects
-    """
+    """Return files that weren't matched in duplicate detection."""
     return [f for f in folder_files if f.file_path not in matched_files]
