@@ -172,6 +172,24 @@ class TestFixDuplicates:
         assert files_fixed == 0
         assert "mismatch" in capsys.readouterr().out.lower()
 
+    def test_quick_hash_mismatch_skipped(self, temp_dir, capsys):
+        """Same-size files with different content are skipped by quick-hash check."""
+        src_path = temp_dir / "src" / "HASH-001.mp4"
+        tgt_path = temp_dir / "tgt" / "HASH-001.mp4"
+        src_path.parent.mkdir()
+        tgt_path.parent.mkdir()
+        src_path.write_bytes((b"A" * 1024) + (b"B" * 1024))
+        tgt_path.write_bytes((b"A" * 1024) + (b"C" * 1024))
+        original_ino = tgt_path.stat().st_ino
+
+        dup_set = _make_set(_vf(src_path, 2048), copy_files=[_vf(tgt_path, 2048)])
+        files_fixed, space_freed = fix_duplicates([dup_set], auto_confirm=True)
+
+        assert files_fixed == 0
+        assert space_freed == 0
+        assert "quick-hash mismatch" in capsys.readouterr().out.lower()
+        assert tgt_path.stat().st_ino == original_ino
+
     def test_multiple_copies_all_hardlinked(self, temp_dir):
         """All copy pairs in a set are processed and hardlinked."""
         src_path = temp_dir / "src" / "ABC-999.mp4"

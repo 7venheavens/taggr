@@ -55,6 +55,7 @@ Match Types:
 """
 
 import json
+import hashlib
 from pathlib import Path
 
 import click
@@ -62,6 +63,7 @@ import click
 from taggrr.core.duplicate_detector import DuplicateDetector, DuplicateSet
 
 MIN_DUP_FILE_SIZE_BYTES = 100 * 1024 * 1024
+QUICK_HASH_SAMPLE_BYTES = 2 * 1024 * 1024
 
 
 def format_size(bytes_count: int) -> str:
@@ -81,6 +83,37 @@ def _match_badge(match_type: str) -> str:
         "name+content": "[NAME+CONTENT]",
     }
     return badges.get(match_type, f"[{match_type.upper()}]")
+
+
+def compute_quick_hash(
+    file_path: Path, sample_bytes: int = QUICK_HASH_SAMPLE_BYTES
+) -> str:
+    """
+    Compute a lightweight content fingerprint for safety checks.
+
+    Hashes:
+      - full content for very small files (<= 2 * sample_bytes)
+      - otherwise first sample_bytes + last sample_bytes
+    """
+    sha256 = hashlib.sha256()
+    file_size = file_path.stat().st_size
+    sha256.update(str(file_size).encode("utf-8"))
+    sha256.update(b"\0")
+
+    with open(file_path, "rb") as f:
+        if file_size <= sample_bytes * 2:
+            while chunk := f.read(8192):
+                sha256.update(chunk)
+            return sha256.hexdigest()
+
+        head = f.read(sample_bytes)
+        f.seek(file_size - sample_bytes)
+        tail = f.read(sample_bytes)
+        sha256.update(head)
+        sha256.update(b"\0")
+        sha256.update(tail)
+
+    return sha256.hexdigest()
 
 
 def display_groups(groups: list[DuplicateSet], source_dir: Path) -> None:
@@ -345,6 +378,23 @@ def fix_duplicates(
                     continue
             except OSError as e:
                 click.echo(click.style(f"  ✗ Cannot stat file: {e}", fg="red"))
+                continue
+
+            # Quick content fingerprint check (head+tail samples)
+            try:
+                src_quick_hash = compute_quick_hash(source_file.file_path)
+                copy_quick_hash = compute_quick_hash(copy_path)
+                if src_quick_hash != copy_quick_hash:
+                    click.echo(
+                        click.style(
+                            f"  ⚠ Quick-hash mismatch, skipping: {copy_path}",
+                            fg="red",
+                            bold=True,
+                        )
+                    )
+                    continue
+            except OSError as e:
+                click.echo(click.style(f"  ✗ Cannot hash file: {e}", fg="red"))
                 continue
 
             click.echo(f"  Will replace: {copy_path} ({format_size(copy_size)})")
