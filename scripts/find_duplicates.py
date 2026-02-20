@@ -431,16 +431,24 @@ def main(
         content_match=content_match,
     )
 
-    # Always show groups and summary first (even in fix mode)
+    # Always show groups and summary first (even in fix mode).
+    # Pure-HARDLINK sets are hidden by default (already optimal, not actionable).
+    # The summary always reflects all sets so counts are complete.
     if show_hardlinks_only:
         display_groups([g for g in groups if g.has_hardlinks], source)
-        display_summary([g for g in groups if g.has_hardlinks], source, target_dirs)
     elif show_copies_only:
         display_groups([g for g in groups if g.has_copies], source)
-        display_summary([g for g in groups if g.has_copies], source, target_dirs)
     else:
-        display_groups(groups, source)
-        display_summary(groups, source, target_dirs)
+        actionable = [g for g in groups if g.status != "HARDLINK"]
+        display_groups(actionable, source)
+        hidden = len(groups) - len(actionable)
+        if hidden:
+            click.echo(
+                f"({hidden} hardlinked set(s) not shown — already optimal;"
+                " use --show-hardlinks-only to view them)"
+            )
+
+    display_summary(groups, source, target_dirs)
 
     # Export JSON if requested
     if output_json:

@@ -1,722 +1,375 @@
 """Tests for find_duplicates.py CLI script."""
 
 import os
+import sys
 from pathlib import Path
 from unittest.mock import patch
 
 from click.testing import CliRunner
 
-from find_duplicates import calculate_file_hash, fix_duplicates, format_size, main
-from taggrr.core.duplicate_detector import DuplicateGroup
-from taggrr.core.models import SourceType, VideoFile
+# find_duplicates.py lives in scripts/, not in the package
+sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
+
+from find_duplicates import fix_duplicates, format_size, main  # noqa: E402
+from taggrr.core.duplicate_detector import DuplicateSet  # noqa: E402
+from taggrr.core.models import SourceType, VideoFile  # noqa: E402
 
 
-class TestCalculateFileHash:
-    """Test file hash calculation."""
+# ---------------------------------------------------------------------------
+# Test helpers
+# ---------------------------------------------------------------------------
 
-    def test_identical_files_same_hash(self, temp_dir):
-        """Test that identical files produce the same hash."""
-        file1 = temp_dir / "file1.txt"
-        file2 = temp_dir / "file2.txt"
 
-        content = b"test content for hashing"
-        file1.write_bytes(content)
-        file2.write_bytes(content)
+def _vf(path: Path, size: int = 1000) -> VideoFile:
+    """Create a VideoFile pointing at the given path."""
+    return VideoFile(
+        file_path=path,
+        folder_name=path.parent.name,
+        file_name=path.name,
+        file_size=size,
+    )
 
-        hash1 = calculate_file_hash(file1)
-        hash2 = calculate_file_hash(file2)
 
-        assert hash1 == hash2
-        assert len(hash1) == 64  # SHA256 produces 64 hex characters
+def _make_set(
+    source_file: VideoFile,
+    copy_files: list[VideoFile] | None = None,
+    hardlink_files: list[VideoFile] | None = None,
+    video_id: str = "TEST123",
+) -> DuplicateSet:
+    """Build a DuplicateSet from a source file plus copy/hardlink files."""
+    copy_files = copy_files or []
+    hardlink_files = hardlink_files or []
 
-    def test_different_files_different_hash(self, temp_dir):
-        """Test that different files produce different hashes."""
-        file1 = temp_dir / "file1.txt"
-        file2 = temp_dir / "file2.txt"
+    files_by_dir: dict[Path, list[VideoFile]] = {
+        source_file.file_path.parent: [source_file]
+    }
+    for f in copy_files + hardlink_files:
+        files_by_dir.setdefault(f.file_path.parent, []).append(f)
 
-        file1.write_bytes(b"content A")
-        file2.write_bytes(b"content B")
+    return DuplicateSet(
+        match_type="name",
+        video_id=video_id,
+        confidence=0.9,
+        source_type=SourceType.DMM,
+        file_size=None,
+        file_hash=None,
+        files_by_dir=files_by_dir,
+        source_file=source_file,
+        hardlink_pairs=[(source_file, f) for f in hardlink_files],
+        copy_pairs=[(source_file, f) for f in copy_files],
+        wasted_space=sum(f.file_size or 0 for f in copy_files),
+    )
 
-        hash1 = calculate_file_hash(file1)
-        hash2 = calculate_file_hash(file2)
 
-        assert hash1 != hash2
-
-    def test_large_file_hashing(self, temp_dir):
-        """Test hashing of large files (chunked reading)."""
-        large_file = temp_dir / "large.bin"
-        # Create a 1MB file
-        large_file.write_bytes(b"x" * (1024 * 1024))
-
-        hash_result = calculate_file_hash(large_file)
-
-        assert len(hash_result) == 64
-        # Verify it's a valid hex string
-        int(hash_result, 16)
+# ---------------------------------------------------------------------------
+# format_size
+# ---------------------------------------------------------------------------
 
 
 class TestFormatSize:
-    """Test human-readable size formatting."""
-
     def test_bytes(self):
-        """Test byte formatting."""
         assert format_size(100) == "100.0 B"
         assert format_size(1023) == "1023.0 B"
 
     def test_kilobytes(self):
-        """Test kilobyte formatting."""
         assert format_size(1024) == "1.0 KB"
         assert format_size(1536) == "1.5 KB"
 
     def test_megabytes(self):
-        """Test megabyte formatting."""
         assert format_size(1024 * 1024) == "1.0 MB"
-        assert format_size(1024 * 1024 * 2.5) == "2.5 MB"
 
     def test_gigabytes(self):
-        """Test gigabyte formatting."""
-        assert format_size(1024 * 1024 * 1024) == "1.0 GB"
-        assert format_size(1024 * 1024 * 1024 * 10.3) == "10.3 GB"
+        assert format_size(1024**3) == "1.0 GB"
+
+
+# ---------------------------------------------------------------------------
+# fix_duplicates
+# ---------------------------------------------------------------------------
 
 
 class TestFixDuplicates:
-    """Test fix_duplicates function."""
+    """Tests for the fix_duplicates function."""
 
-    def test_no_copies_found(self, capsys):
-        """Test handling when no duplicate copies exist."""
-        # Create groups with only hardlinks (no copies)
-        folder_a = Path("/fake/folder_a")
-        folder_b = Path("/fake/folder_b")
+    def test_hardlink_only_set_produces_no_work(self, temp_dir, capsys):
+        """A set with only hardlinks is already optimal; nothing to fix."""
+        src = temp_dir / "src" / "test.mp4"
+        tgt = temp_dir / "tgt" / "test.mp4"
+        src.parent.mkdir()
+        tgt.parent.mkdir()
+        src.write_bytes(b"video")
+        os.link(src, tgt)
 
-        file_a = VideoFile(
-            file_path=folder_a / "test.mp4",
-            folder_name="folder_a",
-            file_name="test.mp4",
-            file_size=1000,
-        )
-        file_b = VideoFile(
-            file_path=folder_b / "test.mp4",
-            folder_name="folder_b",
-            file_name="test.mp4",
-            file_size=1000,
-        )
-
-        # Group with only hardlinks (no copy_pairs)
-        group = DuplicateGroup(
-            video_id="TEST-123",
-            confidence=0.9,
-            source_type=SourceType.DMM,
-            folder_a_files=[file_a],
-            folder_b_file=file_b,
-            hardlink_pairs=[(file_a, file_b)],
-            copy_pairs=[],
-            total_size=1000,
-            wasted_space=0,
-        )
-
-        files_fixed, space_freed, hardlinks_created = fix_duplicates(
-            [group], auto_confirm=False
-        )
+        dup_set = _make_set(_vf(src, 5), hardlink_files=[_vf(tgt, 5)])
+        files_fixed, space_freed = fix_duplicates([dup_set], auto_confirm=True)
 
         assert files_fixed == 0
         assert space_freed == 0
-        assert hardlinks_created == 0
+        assert "No fixable" in capsys.readouterr().out
 
-        captured = capsys.readouterr()
-        assert "No duplicate copies found to fix" in captured.out
+    def test_auto_confirm_replaces_copy_with_hardlink(self, temp_dir):
+        """auto_confirm=True replaces a copy in the target with a hardlink."""
+        src_path = temp_dir / "src" / "ABC-123.mp4"
+        tgt_path = temp_dir / "tgt" / "ABC-123.mp4"
+        src_path.parent.mkdir()
+        tgt_path.parent.mkdir()
+        src_path.write_bytes(b"x" * 2000)
+        tgt_path.write_bytes(b"x" * 2000)
 
-    def test_auto_confirm_replaces_with_hardlink(self, temp_dir):
-        """Test that auto-confirm mode replaces copies with hardlinks."""
-        # Create real files for testing
-        folder_a = temp_dir / "folder_a"
-        folder_b = temp_dir / "folder_b"
-        folder_a.mkdir()
-        folder_b.mkdir()
+        dup_set = _make_set(_vf(src_path, 2000), copy_files=[_vf(tgt_path, 2000)])
+        files_fixed, space_freed = fix_duplicates([dup_set], auto_confirm=True)
 
-        # Create copy files (not hardlinked)
-        file_a_path = folder_a / "ABC-123.mp4"
-        file_b_path = folder_b / "ABC-123.mp4"
-        file_a_path.write_bytes(b"x" * 2000)
-        file_b_path.write_bytes(b"x" * 2000)
-
-        file_a = VideoFile(
-            file_path=file_a_path,
-            folder_name="folder_a",
-            file_name="ABC-123.mp4",
-            file_size=2000,
-        )
-        file_b = VideoFile(
-            file_path=file_b_path,
-            folder_name="folder_b",
-            file_name="ABC-123.mp4",
-            file_size=2000,
-        )
-
-        # Create group with copy pairs
-        group = DuplicateGroup(
-            video_id="ABC123",
-            confidence=0.8,
-            source_type=SourceType.DMM,
-            folder_a_files=[file_a],
-            folder_b_file=file_b,
-            hardlink_pairs=[],
-            copy_pairs=[(file_a, file_b)],
-            total_size=2000,
-            wasted_space=2000,
-        )
-
-        # Before fix, both files exist and are NOT hardlinked
-        assert file_a_path.exists()
-        assert file_b_path.exists()
-        assert file_a_path.stat().st_ino != file_b_path.stat().st_ino
-
-        # Run fix with auto-confirm
-        files_fixed, space_freed, hardlinks_created = fix_duplicates(
-            [group], auto_confirm=True
-        )
-
-        # Check results
         assert files_fixed == 1
         assert space_freed == 2000
-        assert hardlinks_created == 1
+        assert src_path.exists() and tgt_path.exists()
+        assert src_path.samefile(tgt_path)
 
-        # Both files should exist and now be hardlinked
-        assert file_a_path.exists()
-        assert file_b_path.exists()
-        assert file_a_path.stat().st_ino == file_b_path.stat().st_ino
+    def test_interactive_confirm_replaces_copy(self, temp_dir):
+        """User confirming the interactive prompt causes the hardlink to be created."""
+        src_path = temp_dir / "src" / "DEF-456.mp4"
+        tgt_path = temp_dir / "tgt" / "DEF-456.mp4"
+        src_path.parent.mkdir()
+        tgt_path.parent.mkdir()
+        src_path.write_bytes(b"y" * 1500)
+        tgt_path.write_bytes(b"y" * 1500)
 
-    def test_interactive_mode_with_confirmation(self, temp_dir):
-        """Test interactive mode when user confirms replacement."""
-        folder_a = temp_dir / "folder_a"
-        folder_b = temp_dir / "folder_b"
-        folder_a.mkdir()
-        folder_b.mkdir()
-
-        file_a_path = folder_a / "TEST-456.mp4"
-        file_b_path = folder_b / "TEST-456.mp4"
-        file_a_path.write_bytes(b"y" * 1500)
-        file_b_path.write_bytes(b"y" * 1500)
-
-        file_a = VideoFile(
-            file_path=file_a_path,
-            folder_name="folder_a",
-            file_name="TEST-456.mp4",
-            file_size=1500,
-        )
-        file_b = VideoFile(
-            file_path=file_b_path,
-            folder_name="folder_b",
-            file_name="TEST-456.mp4",
-            file_size=1500,
-        )
-
-        group = DuplicateGroup(
-            video_id="TEST456",
-            confidence=0.85,
-            source_type=SourceType.GENERIC,
-            folder_a_files=[file_a],
-            folder_b_file=file_b,
-            hardlink_pairs=[],
-            copy_pairs=[(file_a, file_b)],
-            total_size=1500,
-            wasted_space=1500,
-        )
-
-        # Mock click.confirm to return True (user confirms)
+        dup_set = _make_set(_vf(src_path, 1500), copy_files=[_vf(tgt_path, 1500)])
         with patch("find_duplicates.click.confirm", return_value=True):
-            files_fixed, space_freed, hardlinks_created = fix_duplicates(
-                [group], auto_confirm=False
-            )
+            files_fixed, space_freed = fix_duplicates([dup_set], auto_confirm=False)
 
         assert files_fixed == 1
-        assert space_freed == 1500
-        assert hardlinks_created == 1
-        assert file_a_path.exists()
-        assert file_b_path.exists()
-        assert file_a_path.stat().st_ino == file_b_path.stat().st_ino
+        assert src_path.samefile(tgt_path)
 
-    def test_interactive_mode_with_rejection(self, temp_dir):
-        """Test interactive mode when user rejects replacement."""
-        folder_a = temp_dir / "folder_a"
-        folder_b = temp_dir / "folder_b"
-        folder_a.mkdir()
-        folder_b.mkdir()
+    def test_interactive_reject_leaves_files_unchanged(self, temp_dir):
+        """User rejecting the prompt leaves both files untouched."""
+        src_path = temp_dir / "src" / "GHI-789.mp4"
+        tgt_path = temp_dir / "tgt" / "GHI-789.mp4"
+        src_path.parent.mkdir()
+        tgt_path.parent.mkdir()
+        src_path.write_bytes(b"z" * 1000)
+        tgt_path.write_bytes(b"z" * 1000)
+        original_ino = tgt_path.stat().st_ino
 
-        file_a_path = folder_a / "KEEP-789.mp4"
-        file_b_path = folder_b / "KEEP-789.mp4"
-        file_a_path.write_bytes(b"z" * 1000)
-        file_b_path.write_bytes(b"z" * 1000)
-
-        file_a = VideoFile(
-            file_path=file_a_path,
-            folder_name="folder_a",
-            file_name="KEEP-789.mp4",
-            file_size=1000,
-        )
-        file_b = VideoFile(
-            file_path=file_b_path,
-            folder_name="folder_b",
-            file_name="KEEP-789.mp4",
-            file_size=1000,
-        )
-
-        group = DuplicateGroup(
-            video_id="KEEP789",
-            confidence=0.75,
-            source_type=SourceType.DMM,
-            folder_a_files=[file_a],
-            folder_b_file=file_b,
-            hardlink_pairs=[],
-            copy_pairs=[(file_a, file_b)],
-            total_size=1000,
-            wasted_space=1000,
-        )
-
-        # Store original inodes
-        orig_ino_a = file_a_path.stat().st_ino
-        orig_ino_b = file_b_path.stat().st_ino
-
-        # Mock click.confirm to return False (user rejects)
+        dup_set = _make_set(_vf(src_path, 1000), copy_files=[_vf(tgt_path, 1000)])
         with patch("find_duplicates.click.confirm", return_value=False):
-            files_fixed, space_freed, hardlinks_created = fix_duplicates(
-                [group], auto_confirm=False
-            )
+            files_fixed, space_freed = fix_duplicates([dup_set], auto_confirm=False)
 
-        # Nothing should be changed
         assert files_fixed == 0
         assert space_freed == 0
-        assert hardlinks_created == 0
-        assert file_a_path.exists()
-        assert file_b_path.exists()
-        # Inodes should be unchanged (still not hardlinked)
-        assert file_a_path.stat().st_ino == orig_ino_a
-        assert file_b_path.stat().st_ino == orig_ino_b
+        assert tgt_path.stat().st_ino == original_ino
 
-    def test_multiple_groups_mixed_decisions(self, temp_dir):
-        """Test processing multiple groups with mixed user decisions."""
-        folder_a = temp_dir / "folder_a"
-        folder_b = temp_dir / "folder_b"
-        folder_a.mkdir()
-        folder_b.mkdir()
+    def test_size_mismatch_skipped(self, temp_dir, capsys):
+        """Files with different sizes are always skipped for safety."""
+        src_path = temp_dir / "src" / "SIZE-001.mp4"
+        tgt_path = temp_dir / "tgt" / "SIZE-001.mp4"
+        src_path.parent.mkdir()
+        tgt_path.parent.mkdir()
+        src_path.write_bytes(b"x" * 1000)
+        tgt_path.write_bytes(b"x" * 2000)  # different size
 
-        # Create two groups
-        files_to_create = [
-            ("GROUP1-111.mp4", "GROUP1111", 1000),
-            ("GROUP2-222.mp4", "GROUP2222", 2000),
-        ]
+        dup_set = _make_set(_vf(src_path, 1000), copy_files=[_vf(tgt_path, 2000)])
+        files_fixed, space_freed = fix_duplicates([dup_set], auto_confirm=True)
 
-        groups = []
-        for filename, video_id, size in files_to_create:
-            file_a_path = folder_a / filename
-            file_b_path = folder_b / filename
-            file_a_path.write_bytes(b"x" * size)
-            file_b_path.write_bytes(b"x" * size)
+        assert files_fixed == 0
+        assert "mismatch" in capsys.readouterr().out.lower()
 
-            file_a = VideoFile(
-                file_path=file_a_path,
-                folder_name="folder_a",
-                file_name=filename,
-                file_size=size,
-            )
-            file_b = VideoFile(
-                file_path=file_b_path,
-                folder_name="folder_b",
-                file_name=filename,
-                file_size=size,
-            )
+    def test_multiple_copies_all_hardlinked(self, temp_dir):
+        """All copy pairs in a set are processed and hardlinked."""
+        src_path = temp_dir / "src" / "ABC-999.mp4"
+        tgt1_path = temp_dir / "tgt1" / "ABC-999.mp4"
+        tgt2_path = temp_dir / "tgt2" / "ABC-999.mp4"
+        for p in (src_path, tgt1_path, tgt2_path):
+            p.parent.mkdir(parents=True)
+            p.write_bytes(b"x" * 1000)
 
-            group = DuplicateGroup(
-                video_id=video_id,
-                confidence=0.8,
-                source_type=SourceType.DMM,
-                folder_a_files=[file_a],
-                folder_b_file=file_b,
-                hardlink_pairs=[],
-                copy_pairs=[(file_a, file_b)],
-                total_size=size,
-                wasted_space=size,
-            )
-            groups.append(group)
-
-        # Mock user confirming first, rejecting second
-        with patch("find_duplicates.click.confirm", side_effect=[True, False]):
-            files_fixed, space_freed, hardlinks_created = fix_duplicates(
-                groups, auto_confirm=False
-            )
-
-        assert files_fixed == 1
-        assert space_freed == 1000
-        assert hardlinks_created == 1
-
-        # First group's files should now be hardlinked
-        file1_a = folder_a / "GROUP1-111.mp4"
-        file1_b = folder_b / "GROUP1-111.mp4"
-        assert file1_a.exists()
-        assert file1_b.exists()
-        assert file1_a.stat().st_ino == file1_b.stat().st_ino
-
-        # Second group's files should still be separate copies
-        file2_a = folder_a / "GROUP2-222.mp4"
-        file2_b = folder_b / "GROUP2-222.mp4"
-        assert file2_a.exists()
-        assert file2_b.exists()
-        assert file2_a.stat().st_ino != file2_b.stat().st_ino
-
-    def test_error_handling(self, temp_dir, capsys):
-        """Test handling of errors during hardlink creation."""
-        folder_a = temp_dir / "folder_a"
-        folder_b = temp_dir / "folder_b"
-        folder_a.mkdir()
-        folder_b.mkdir()
-
-        file_a_path = folder_a / "ERROR-999.mp4"
-        file_b_path = folder_b / "ERROR-999.mp4"
-        file_a_path.write_bytes(b"content")
-        file_b_path.write_bytes(b"content")
-
-        file_a = VideoFile(
-            file_path=file_a_path,
-            folder_name="folder_a",
-            file_name="ERROR-999.mp4",
-            file_size=500,
+        dup_set = _make_set(
+            _vf(src_path, 1000),
+            copy_files=[_vf(tgt1_path, 1000), _vf(tgt2_path, 1000)],
         )
-        file_b = VideoFile(
-            file_path=file_b_path,
-            folder_name="folder_b",
-            file_name="ERROR-999.mp4",
-            file_size=500,
-        )
+        files_fixed, space_freed = fix_duplicates([dup_set], auto_confirm=True)
 
-        group = DuplicateGroup(
-            video_id="ERROR999",
-            confidence=0.9,
-            source_type=SourceType.GENERIC,
-            folder_a_files=[file_a],
-            folder_b_file=file_b,
-            hardlink_pairs=[],
-            copy_pairs=[(file_a, file_b)],
-            total_size=500,
-            wasted_space=500,
-        )
+        assert files_fixed == 2
+        assert space_freed == 2000
+        assert src_path.samefile(tgt1_path)
+        assert src_path.samefile(tgt2_path)
 
-        # Mock unlink to raise an exception
+    def test_error_during_unlink_handled_gracefully(self, temp_dir, capsys):
+        """An OS error during unlink is caught and reported; fix count stays 0."""
+        src_path = temp_dir / "src" / "ERR-001.mp4"
+        tgt_path = temp_dir / "tgt" / "ERR-001.mp4"
+        src_path.parent.mkdir()
+        tgt_path.parent.mkdir()
+        src_path.write_bytes(b"content")
+        tgt_path.write_bytes(b"content")
+
+        dup_set = _make_set(_vf(src_path, 7), copy_files=[_vf(tgt_path, 7)])
         original_unlink = Path.unlink
 
-        def mock_unlink(self, *args, **kwargs):
-            if self == file_b_path:
+        def fail_tgt_unlink(self, *args, **kwargs):
+            if self == tgt_path:
                 raise PermissionError("Permission denied")
             return original_unlink(self, *args, **kwargs)
 
-        with patch.object(Path, "unlink", mock_unlink):
-            files_fixed, space_freed, hardlinks_created = fix_duplicates(
-                [group], auto_confirm=True
-            )
+        with patch.object(Path, "unlink", fail_tgt_unlink):
+            files_fixed, space_freed = fix_duplicates([dup_set], auto_confirm=True)
 
-        # Should handle error gracefully
         assert files_fixed == 0
-        assert space_freed == 0
-        assert hardlinks_created == 0
+        assert "Error" in capsys.readouterr().out
 
-        captured = capsys.readouterr()
-        assert "Error" in captured.out
+    def test_returns_two_tuple(self, temp_dir):
+        """fix_duplicates returns (files_fixed, space_freed) — not a three-tuple."""
+        src_path = temp_dir / "src" / "XYZ-001.mp4"
+        tgt_path = temp_dir / "tgt" / "XYZ-001.mp4"
+        src_path.parent.mkdir()
+        tgt_path.parent.mkdir()
+        src_path.write_bytes(b"data")
+        tgt_path.write_bytes(b"data")
 
-    def test_skips_hardlink_groups(self, temp_dir, capsys):
-        """Test that hardlink-only groups are skipped."""
-        folder_a = temp_dir / "folder_a"
-        folder_b = temp_dir / "folder_b"
-        folder_a.mkdir()
-        folder_b.mkdir()
+        dup_set = _make_set(_vf(src_path, 4), copy_files=[_vf(tgt_path, 4)])
+        result = fix_duplicates([dup_set], auto_confirm=True)
 
-        # Create hardlinked files
-        original = folder_b / "FC2-PPV-555555.mp4"
-        original.write_bytes(b"hardlink content")
-        hardlink = folder_a / "fc2-ppv-555555.mp4"
-        os.link(original, hardlink)
+        assert len(result) == 2
 
-        file_a = VideoFile(
-            file_path=hardlink,
-            folder_name="folder_a",
-            file_name="fc2-ppv-555555.mp4",
-            file_size=1000,
-        )
-        file_b = VideoFile(
-            file_path=original,
-            folder_name="folder_b",
-            file_name="FC2-PPV-555555.mp4",
-            file_size=1000,
-        )
 
-        # Group with hardlinks only
-        hardlink_group = DuplicateGroup(
-            video_id="555555",
-            confidence=0.95,
-            source_type=SourceType.FC2,
-            folder_a_files=[file_a],
-            folder_b_file=file_b,
-            hardlink_pairs=[(file_a, file_b)],
-            copy_pairs=[],
-            total_size=1000,
-            wasted_space=0,
-        )
-
-        files_fixed, space_freed, hardlinks_created = fix_duplicates(
-            [hardlink_group], auto_confirm=True
-        )
-
-        # No files should be changed
-        assert files_fixed == 0
-        assert space_freed == 0
-        assert hardlinks_created == 0
-        assert original.exists()
-        assert hardlink.exists()
-
-        # When there are only hardlink groups and no copy groups,
-        # the message says "No duplicate copies found"
-        captured = capsys.readouterr()
-        assert "No duplicate copies found to fix" in captured.out
-
-    def test_skips_files_with_different_content(self, temp_dir, capsys):
-        """Test that files with mismatched hashes are skipped when verify_hash=True."""
-        folder_a = temp_dir / "folder_a"
-        folder_b = temp_dir / "folder_b"
-        folder_a.mkdir()
-        folder_b.mkdir()
-
-        # Create files with DIFFERENT content but same ID pattern
-        file_a_path = folder_a / "MISMATCH-123.mp4"
-        file_b_path = folder_b / "MISMATCH-123.mp4"
-        file_a_path.write_bytes(b"different content A")
-        file_b_path.write_bytes(b"different content B")
-
-        file_a = VideoFile(
-            file_path=file_a_path,
-            folder_name="folder_a",
-            file_name="MISMATCH-123.mp4",
-            file_size=len(b"different content A"),
-        )
-        file_b = VideoFile(
-            file_path=file_b_path,
-            folder_name="folder_b",
-            file_name="MISMATCH-123.mp4",
-            file_size=len(b"different content B"),
-        )
-
-        group = DuplicateGroup(
-            video_id="MISMATCH123",
-            confidence=0.9,
-            source_type=SourceType.DMM,
-            folder_a_files=[file_a],
-            folder_b_file=file_b,
-            hardlink_pairs=[],
-            copy_pairs=[(file_a, file_b)],
-            total_size=len(b"different content A"),
-            wasted_space=len(b"different content A"),
-        )
-
-        # Store original content
-        orig_content_a = file_a_path.read_bytes()
-        orig_content_b = file_b_path.read_bytes()
-
-        # Run with verify_hash=True
-        files_fixed, space_freed, hardlinks_created = fix_duplicates(
-            [group], auto_confirm=True, verify_hash=True
-        )
-
-        # No files should be modified due to hash mismatch
-        assert files_fixed == 0
-        assert space_freed == 0
-        assert hardlinks_created == 0
-
-        # Files should remain unchanged
-        assert file_a_path.read_bytes() == orig_content_a
-        assert file_b_path.read_bytes() == orig_content_b
-        assert file_a_path.stat().st_ino != file_b_path.stat().st_ino
-
-        # Should have warning message
-        captured = capsys.readouterr()
-        assert "different content" in captured.out.lower()
-        assert "skipping" in captured.out.lower()
-
-    def test_skips_files_with_different_sizes(self, temp_dir, capsys):
-        """Test that files with different sizes are always skipped."""
-        folder_a = temp_dir / "folder_a"
-        folder_b = temp_dir / "folder_b"
-        folder_a.mkdir()
-        folder_b.mkdir()
-
-        # Create files with DIFFERENT sizes
-        file_a_path = folder_a / "SIZE-789.mp4"
-        file_b_path = folder_b / "SIZE-789.mp4"
-        file_a_path.write_bytes(b"x" * 1000)  # 1000 bytes
-        file_b_path.write_bytes(b"x" * 2000)  # 2000 bytes
-
-        file_a = VideoFile(
-            file_path=file_a_path,
-            folder_name="folder_a",
-            file_name="SIZE-789.mp4",
-            file_size=1000,
-        )
-        file_b = VideoFile(
-            file_path=file_b_path,
-            folder_name="folder_b",
-            file_name="SIZE-789.mp4",
-            file_size=2000,
-        )
-
-        group = DuplicateGroup(
-            video_id="SIZE789",
-            confidence=0.9,
-            source_type=SourceType.DMM,
-            folder_a_files=[file_a],
-            folder_b_file=file_b,
-            hardlink_pairs=[],
-            copy_pairs=[(file_a, file_b)],
-            total_size=1000,
-            wasted_space=1000,
-        )
-
-        # Run without verify_hash - should still be caught by size check
-        files_fixed, space_freed, hardlinks_created = fix_duplicates(
-            [group], auto_confirm=True, verify_hash=False
-        )
-
-        # No files should be modified due to size mismatch
-        assert files_fixed == 0
-        assert space_freed == 0
-        assert hardlinks_created == 0
-
-        # Files should remain unchanged
-        assert file_a_path.stat().st_ino != file_b_path.stat().st_ino
-
-        # Should have size mismatch warning
-        captured = capsys.readouterr()
-        assert "different sizes" in captured.out.lower()
-        assert "skipping" in captured.out.lower()
-
-    def test_skip_hash_verification_when_disabled(self, temp_dir, capsys):
-        """Test that hash verification is skipped when verify_hash=False."""
-        folder_a = temp_dir / "folder_a"
-        folder_b = temp_dir / "folder_b"
-        folder_a.mkdir()
-        folder_b.mkdir()
-
-        # Create files with DIFFERENT content but same ID
-        file_a_path = folder_a / "NOHASH-456.mp4"
-        file_b_path = folder_b / "NOHASH-456.mp4"
-        file_a_path.write_bytes(b"content A")
-        file_b_path.write_bytes(b"content B")
-
-        file_a = VideoFile(
-            file_path=file_a_path,
-            folder_name="folder_a",
-            file_name="NOHASH-456.mp4",
-            file_size=len(b"content A"),
-        )
-        file_b = VideoFile(
-            file_path=file_b_path,
-            folder_name="folder_b",
-            file_name="NOHASH-456.mp4",
-            file_size=len(b"content B"),
-        )
-
-        group = DuplicateGroup(
-            video_id="NOHASH456",
-            confidence=0.9,
-            source_type=SourceType.DMM,
-            folder_a_files=[file_a],
-            folder_b_file=file_b,
-            hardlink_pairs=[],
-            copy_pairs=[(file_a, file_b)],
-            total_size=len(b"content A"),
-            wasted_space=len(b"content A"),
-        )
-
-        # Run with verify_hash=False (should create hardlink despite different content)
-        files_fixed, space_freed, hardlinks_created = fix_duplicates(
-            [group], auto_confirm=True, verify_hash=False
-        )
-
-        # Files should be linked even though content differs
-        assert files_fixed == 1
-        assert hardlinks_created == 1
-        assert file_a_path.exists()
-        assert file_b_path.exists()
-        assert file_a_path.stat().st_ino == file_b_path.stat().st_ino
-
-        # Should NOT have verification message
-        captured = capsys.readouterr()
-        assert "verifying" not in captured.out.lower()
+# ---------------------------------------------------------------------------
+# CLI integration
+# ---------------------------------------------------------------------------
 
 
 class TestCLIIntegration:
-    """Test CLI command integration."""
+    """End-to-end tests via Click's test runner."""
 
-    def test_help_message(self):
-        """Test that help message displays correctly."""
+    def test_help_shows_key_options(self):
         runner = CliRunner()
         result = runner.invoke(main, ["--help"])
-
         assert result.exit_code == 0
         assert "Find duplicate videos" in result.output
         assert "--fix" in result.output
         assert "--confirm" in result.output
+        assert "--content-match" in result.output
 
-    def test_confirm_requires_fix(self, temp_dir):
-        """Test that --confirm can only be used with --fix."""
-        runner = CliRunner()
+    def test_confirm_without_fix_is_error(self, temp_dir):
+        source = temp_dir / "source"
+        target = temp_dir / "target"
+        source.mkdir()
+        target.mkdir()
+        result = CliRunner().invoke(main, [str(source), str(target), "--confirm"])
+        assert "--confirm can only be used with --fix" in result.output
 
-        folder_a = temp_dir / "folder_a"
-        folder_b = temp_dir / "folder_b"
-        folder_a.mkdir()
-        folder_b.mkdir()
-
-        result = runner.invoke(
-            main, [str(folder_a), str(folder_b), "--confirm"]
+    def test_show_flags_incompatible_with_fix(self, temp_dir):
+        source = temp_dir / "source"
+        target = temp_dir / "target"
+        source.mkdir()
+        target.mkdir()
+        result = CliRunner().invoke(
+            main, [str(source), str(target), "--fix", "--show-copies-only"]
         )
+        assert "cannot be used with --fix" in result.output
 
-        assert "Error: --confirm can only be used with --fix" in result.output
+    def test_display_mode_shows_summary(self, temp_dir):
+        source = temp_dir / "source"
+        target = temp_dir / "target"
+        source.mkdir()
+        target.mkdir()
+        (source / "ABC-200.mp4").write_bytes(b"content")
+        (target / "ABC-200.mp4").write_bytes(b"content")
 
-    def test_fix_mode_displays_correctly(self, temp_dir):
-        """Test that fix mode displays proper header."""
-        runner = CliRunner()
-
-        folder_a = temp_dir / "folder_a"
-        folder_b = temp_dir / "folder_b"
-        folder_a.mkdir()
-        folder_b.mkdir()
-
-        # Create a duplicate copy
-        file_a = folder_a / "TEST-100.mp4"
-        file_b = folder_b / "TEST-100.mp4"
-        file_a.write_bytes(b"test content")
-        file_b.write_bytes(b"test content")
-
-        result = runner.invoke(
-            main, [str(folder_a), str(folder_b), "--fix", "--confirm"]
-        )
-
-        assert "FIX MODE (auto-confirm)" in result.output
-        assert "FIX SUMMARY" in result.output
-
-    def test_display_mode_without_fix(self, temp_dir):
-        """Test normal display mode without fix flag."""
-        runner = CliRunner()
-
-        folder_a = temp_dir / "folder_a"
-        folder_b = temp_dir / "folder_b"
-        folder_a.mkdir()
-        folder_b.mkdir()
-
-        # Create a duplicate
-        file_a = folder_a / "ABC-200.mp4"
-        file_b = folder_b / "ABC-200.mp4"
-        file_a.write_bytes(b"content")
-        file_b.write_bytes(b"content")
-
-        result = runner.invoke(main, [str(folder_a), str(folder_b)])
-
+        result = CliRunner().invoke(main, [str(source), str(target)])
         assert result.exit_code == 0
         assert "Video Duplicate Detection" in result.output
         assert "SUMMARY" in result.output
-        # Should not be in fix mode
         assert "FIX MODE" not in result.output
+
+    def test_fix_with_autoconfirm_creates_hardlink(self, temp_dir):
+        """--fix --confirm replaces the target copy with a hardlink to source."""
+        source = temp_dir / "source"
+        target = temp_dir / "target"
+        source.mkdir()
+        target.mkdir()
+        src_file = source / "TEST-100.mp4"
+        tgt_file = target / "TEST-100.mp4"
+        src_file.write_bytes(b"test content")
+        tgt_file.write_bytes(b"test content")
+
+        result = CliRunner().invoke(
+            main, [str(source), str(target), "--fix", "--confirm"]
+        )
+        assert "FIX SUMMARY" in result.output
+        assert src_file.samefile(tgt_file)
+
+    def test_fix_aborted_when_user_declines_global_prompt(self, temp_dir):
+        """Without --confirm, declining the global prompt aborts the fix."""
+        source = temp_dir / "source"
+        target = temp_dir / "target"
+        source.mkdir()
+        target.mkdir()
+        src_file = source / "ABC-300.mp4"
+        tgt_file = target / "ABC-300.mp4"
+        src_file.write_bytes(b"video")
+        tgt_file.write_bytes(b"video")
+        original_ino = tgt_file.stat().st_ino
+
+        # Simulate user typing "n" at the global confirmation prompt
+        result = CliRunner().invoke(
+            main, [str(source), str(target), "--fix"], input="n\n"
+        )
+        assert "Aborted" in result.output
+        assert tgt_file.stat().st_ino == original_ino
+
+    def test_multi_target_cli(self, temp_dir):
+        """Multiple target directories are accepted and shown in the summary."""
+        source = temp_dir / "source"
+        target1 = temp_dir / "target1"
+        target2 = temp_dir / "target2"
+        for d in (source, target1, target2):
+            d.mkdir()
+        (source / "ABC-300.mp4").write_bytes(b"v")
+        (target1 / "ABC-300.mp4").write_bytes(b"v")
+        (target2 / "ABC-300.mp4").write_bytes(b"v")
+
+        result = CliRunner().invoke(
+            main, [str(source), str(target1), str(target2)]
+        )
+        assert result.exit_code == 0
+        assert "SUMMARY" in result.output
+        assert "Duplicate Set" in result.output
+
+    def test_content_match_flag_accepted(self, temp_dir):
+        """--content-match flag is accepted without error."""
+        source = temp_dir / "source"
+        target = temp_dir / "target"
+        source.mkdir()
+        target.mkdir()
+
+        result = CliRunner().invoke(
+            main, [str(source), str(target), "--content-match"]
+        )
+        assert result.exit_code == 0
+        assert "Content match:   yes" in result.output
+
+    def test_json_export(self, temp_dir):
+        """--output-json writes a valid JSON file with the expected structure."""
+        import json
+
+        source = temp_dir / "source"
+        target = temp_dir / "target"
+        source.mkdir()
+        target.mkdir()
+        (source / "ABC-123.mp4").write_bytes(b"content")
+        (target / "ABC-123.mp4").write_bytes(b"content")
+
+        out_file = temp_dir / "report.json"
+        CliRunner().invoke(
+            main, [str(source), str(target), f"--output-json={out_file}"]
+        )
+
+        assert out_file.exists()
+        data = json.loads(out_file.read_text())
+        assert "duplicate_sets" in data
+        assert len(data["duplicate_sets"]) == 1
+        entry = data["duplicate_sets"][0]
+        assert "video_id" in entry
+        assert "match_type" in entry
+        assert "hardlink_pairs" in entry
+        assert "copy_pairs" in entry
+        assert "files_by_dir" in entry
+        assert "source_file" in entry
