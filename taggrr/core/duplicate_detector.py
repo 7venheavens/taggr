@@ -31,6 +31,11 @@ class DuplicateSet:
     # The canonical source file (from the source dir); None if source has no file here
     source_file: VideoFile | None
 
+    # Inode chains: index 0 is the source's chain (files sharing source_file's inode),
+    # indices 1+ are copy chains (each inner list = one distinct inode = one wasted copy).
+    # When source_file is None all chains are listed without a "source" designation.
+    inode_chains: list[list[VideoFile]] = field(default_factory=list)
+
     # Hardlink/copy analysis: (source_file, other_file) pairs
     hardlink_pairs: list[tuple[VideoFile, VideoFile]] = field(default_factory=list)
     copy_pairs: list[tuple[VideoFile, VideoFile]] = field(default_factory=list)
@@ -60,6 +65,39 @@ class DuplicateSet:
         if self.has_copies and not self.has_hardlinks:
             return "COPY"
         return "MIXED"
+
+
+def _group_files_by_inode(files: list["VideoFile"]) -> list[list["VideoFile"]]:
+    """
+    Group files by inode identity (same underlying data on disk).
+
+    Each inner list contains all paths that share the same inode, i.e. are
+    hardlinks of each other.  Files that cannot be stat-ed, or whose filesystem
+    does not expose inode numbers (st_ino == 0, e.g. FAT32), are placed in
+    singleton groups so they are never accidentally merged.
+
+    Args:
+        files: VideoFile objects to group.
+
+    Returns:
+        List of groups; each group is a list of VideoFiles sharing one inode.
+    """
+    groups: dict[tuple[int, int], list[VideoFile]] = {}
+    counter = 0
+    for f in files:
+        try:
+            st = f.file_path.stat()
+            if st.st_ino != 0:
+                key: tuple[int, int] = (st.st_dev, st.st_ino)
+            else:
+                # Filesystem has no inode support — treat each path as unique.
+                key = (-1, counter)
+                counter += 1
+        except OSError:
+            key = (-2, counter)
+            counter += 1
+        groups.setdefault(key, []).append(f)
+    return list(groups.values())
 
 
 def are_hardlinks(path1: Path, path2: Path) -> bool:
@@ -347,11 +385,13 @@ class DuplicateDetector:
         source_file: VideoFile | None,
         source_dir: Path | None,
     ) -> DuplicateSet:
-        """Create a DuplicateSet and populate hardlink/copy pairs."""
+        """Create a DuplicateSet and populate hardlink/copy pairs and inode chains."""
         hardlink_pairs: list[tuple[VideoFile, VideoFile]] = []
         copy_pairs: list[tuple[VideoFile, VideoFile]] = []
+        all_files = [f for files in files_by_dir.values() for f in files]
 
         if source_file is not None:
+            # Build pairs relative to source_file, skipping source dir (fix-mode use).
             for group_dir, files in files_by_dir.items():
                 if source_dir is not None and group_dir == source_dir:
                     continue
@@ -363,8 +403,40 @@ class DuplicateDetector:
                     else:
                         copy_pairs.append((source_file, f))
 
-        # Wasted space = sum of non-source copy file sizes (the files we'd delete)
-        wasted_space = sum(f[1].file_size or 0 for f in copy_pairs)
+            # Wasted space: count one file-size per distinct copy inode.
+            # Multiple paths in the same copy chain (hardlinked to each other but not
+            # to source) share the same blocks — only one copy of the data is wasted.
+            copy_file_list = [f for _, f in copy_pairs]
+            copy_inode_groups = _group_files_by_inode(copy_file_list)
+            wasted_space = sum(grp[0].file_size or 0 for grp in copy_inode_groups)
+
+            # Build inode_chains for display: source's chain first, copy chains after.
+            raw_chains = _group_files_by_inode(all_files)
+            raw_chains = [sorted(c, key=lambda f: str(f.file_path)) for c in raw_chains]
+            src_idx = next(
+                (
+                    i
+                    for i, c in enumerate(raw_chains)
+                    if any(f.file_path == source_file.file_path for f in c)
+                ),
+                None,
+            )
+            if src_idx is not None:
+                src_chain = raw_chains[src_idx]
+                rest = sorted(
+                    [c for i, c in enumerate(raw_chains) if i != src_idx],
+                    key=lambda c: str(c[0].file_path),
+                )
+                inode_chains = [src_chain] + rest
+            else:
+                inode_chains = sorted(raw_chains, key=lambda c: str(c[0].file_path))
+        else:
+            raw_chains = _group_files_by_inode(all_files)
+            inode_chains = sorted(
+                [sorted(c, key=lambda f: str(f.file_path)) for c in raw_chains],
+                key=lambda c: str(c[0].file_path),
+            )
+            wasted_space = 0
 
         return DuplicateSet(
             match_type=match_type,
@@ -375,6 +447,7 @@ class DuplicateDetector:
             file_hash=file_hash,
             files_by_dir=files_by_dir,
             source_file=source_file,
+            inode_chains=inode_chains,
             hardlink_pairs=hardlink_pairs,
             copy_pairs=copy_pairs,
             wasted_space=wasted_space,

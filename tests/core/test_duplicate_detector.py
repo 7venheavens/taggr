@@ -4,6 +4,7 @@ import os
 
 from taggrr.core.duplicate_detector import (
     DuplicateDetector,
+    _group_files_by_inode,
     are_hardlinks,
     compute_hash,
     get_unmatched_files,
@@ -439,6 +440,170 @@ class TestPartAwareMatching:
 
         sets = DuplicateDetector().scan_multiple(source.parent, [target])
         assert len(sets) == 0
+
+
+class TestUncenProviderIds:
+    """Provider-specific ID extraction for uncensored sources."""
+
+    def test_1pon_ids_are_grouped_by_date_id(self, temp_dir):
+        source = temp_dir / "source"
+        target = temp_dir / "target"
+        source.mkdir()
+        target.mkdir()
+
+        (source / "[BT]102116_410-1pon-1080p.mp4").write_bytes(b"a")
+        (source / "[BT]100616_399-1pon-1080p.mp4").write_bytes(b"b")
+        (target / "102116_410-1pon-1080p.mp4").write_bytes(b"c")
+        (target / "100616_399-1pon-1080p.mp4").write_bytes(b"d")
+
+        sets = DuplicateDetector().scan_multiple(source, [target], min_confidence=0.5)
+        ids = sorted(s.video_id for s in sets)
+        assert ids == ["100616399", "102116410"]
+
+    def test_caribpr_ids_prefer_date_id_not_quality_token(self, temp_dir):
+        source = temp_dir / "source"
+        target = temp_dir / "target"
+        source.mkdir()
+        target.mkdir()
+
+        (source / "[BT]121616_005-caribpr-1080p.mp4").write_bytes(b"a")
+        (source / "[BT]123016_005-caribpr-1080p.mp4").write_bytes(b"b")
+        (target / "121616_005-caribpr-1080p.mp4").write_bytes(b"c")
+        (target / "123016_005-caribpr-1080p.mp4").write_bytes(b"d")
+
+        sets = DuplicateDetector().scan_multiple(source, [target], min_confidence=0.5)
+        ids = sorted(s.video_id for s in sets)
+        assert ids == ["121616005", "123016005"]
+        assert all("RIBPR1080" not in (s.video_id or "") for s in sets)
+
+
+class TestInodeChains:
+    """Inode chain grouping within a duplicate set."""
+
+    def test_single_copy_has_two_chains(self, temp_dir):
+        """One source + one copy produces source chain and one copy chain."""
+        source = temp_dir / "source"
+        target = temp_dir / "target"
+        source.mkdir()
+        target.mkdir()
+        (source / "ABC-123.mp4").write_bytes(b"x" * 1000)
+        (target / "ABC-123.mp4").write_bytes(b"x" * 1000)
+
+        sets = DuplicateDetector().scan_multiple(source, [target])
+        s = sets[0]
+
+        assert len(s.inode_chains) == 2
+        # Chain 0 contains the source file
+        src_paths = {f.file_path for f in s.inode_chains[0]}
+        assert s.source_file.file_path in src_paths
+        # Chain 1 is the copy
+        assert len(s.inode_chains[1]) == 1
+
+    def test_hardlinked_target_is_in_source_chain(self, temp_dir):
+        """A target file hardlinked to source appears in chain 0, no copy chains."""
+        source = temp_dir / "source"
+        target = temp_dir / "target"
+        source.mkdir()
+        target.mkdir()
+        src_file = source / "fc2-ppv-111111.mp4"
+        src_file.write_bytes(b"x" * 1000)
+        os.link(src_file, target / "FC2-PPV-111111.mp4")
+
+        sets = DuplicateDetector().scan_multiple(source, [target])
+        s = sets[0]
+
+        assert len(s.inode_chains) == 1
+        assert len(s.inode_chains[0]) == 2  # source + hardlink
+        assert s.wasted_space == 0
+
+    def test_two_copy_chains_wasted_space_counted_once_each(self, temp_dir):
+        """
+        When a copy chain has two hardlinked paths (C↔D), wasted_space counts
+        that inode once — not once per path.
+
+        Layout (all files named the same so part-token matching is consistent):
+          source/fc2-ppv-111111.mp4  inode A  (source)
+          t1/fc2-ppv-111111.mp4      inode A  (hardlinked to source → source chain)
+          t2/fc2-ppv-111111.mp4      inode C  (independent copy → copy chain, path 1)
+          t3/fc2-ppv-111111.mp4      inode C  (hardlinked to t2 → copy chain, path 2)
+        """
+        source = temp_dir / "source"
+        t1 = temp_dir / "t1"
+        t2 = temp_dir / "t2"
+        t3 = temp_dir / "t3"
+        for d in (source, t1, t2, t3):
+            d.mkdir()
+
+        FILE_SIZE = 2000
+        src_file = source / "fc2-ppv-111111.mp4"
+        src_file.write_bytes(b"x" * FILE_SIZE)
+        os.link(src_file, t1 / "fc2-ppv-111111.mp4")
+
+        copy_file = t2 / "fc2-ppv-111111.mp4"
+        copy_file.write_bytes(b"y" * FILE_SIZE)
+        os.link(copy_file, t3 / "fc2-ppv-111111.mp4")
+
+        sets = DuplicateDetector().scan_multiple(source, [t1, t2, t3])
+        assert len(sets) == 1
+        s = sets[0]
+
+        # Two inode chains: [src + t1 hardlink] and [t2 + t3 hardlink]
+        assert len(s.inode_chains) == 2
+        src_chain_paths = {f.file_path for f in s.inode_chains[0]}
+        assert src_file in src_chain_paths
+        assert (t1 / "fc2-ppv-111111.mp4") in src_chain_paths
+
+        copy_chain_paths = {f.file_path for f in s.inode_chains[1]}
+        assert copy_file in copy_chain_paths
+        assert (t3 / "fc2-ppv-111111.mp4") in copy_chain_paths
+
+        # Copy chain has two paths sharing one inode → count wasted space once
+        assert s.wasted_space == FILE_SIZE
+        assert s.status == "MIXED"
+
+    def test_multiple_independent_copy_chains(self, temp_dir):
+        """Multiple unrelated copy chains each contribute one size to wasted_space."""
+        source = temp_dir / "source"
+        t1 = temp_dir / "t1"
+        t2 = temp_dir / "t2"
+        for d in (source, t1, t2):
+            d.mkdir()
+
+        FILE_SIZE = 3000
+        src_file = source / "MIDE-500.mp4"
+        src_file.write_bytes(b"s" * FILE_SIZE)
+
+        copy_a = t1 / "MIDE-500.mp4"
+        copy_a.write_bytes(b"a" * FILE_SIZE)
+        copy_b = t2 / "MIDE-500.mp4"
+        copy_b.write_bytes(b"b" * FILE_SIZE)
+        # copy_a and copy_b are different inodes (different content written)
+
+        sets = DuplicateDetector().scan_multiple(source, [t1, t2])
+        s = sets[0]
+
+        # 3 chains: source, copy_a, copy_b
+        assert len(s.inode_chains) == 3
+        assert s.wasted_space == FILE_SIZE * 2
+
+    def test_group_files_by_inode_groups_hardlinks(self, temp_dir):
+        """_group_files_by_inode puts hardlinked paths in the same group."""
+        from taggrr.core.scanner import VideoScanner
+
+        f1 = temp_dir / "a.mp4"
+        f1.write_bytes(b"data")
+        f2 = temp_dir / "b.mp4"
+        os.link(f1, f2)
+        f3 = temp_dir / "c.mp4"
+        f3.write_bytes(b"other")
+
+        scanner = VideoScanner()
+        files = scanner.scan_directory(temp_dir)
+        groups = _group_files_by_inode(files)
+
+        assert len(groups) == 2
+        sizes = sorted(len(g) for g in groups)
+        assert sizes == [1, 2]
 
 
 class TestUnmatchedFiles:

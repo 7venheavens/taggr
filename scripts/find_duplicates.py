@@ -116,6 +116,46 @@ def compute_quick_hash(
     return sha256.hexdigest()
 
 
+def _display_chains(group: DuplicateSet, source_dir_r: Path) -> None:
+    """Display a group's files organised by inode chain."""
+    src_path = group.source_file.file_path if group.source_file else None
+
+    for chain_idx, chain in enumerate(group.inode_chains):
+        letter = chr(ord("A") + chain_idx) if chain_idx < 26 else str(chain_idx + 1)
+        chain_size = format_size(chain[0].file_size or 0)
+        is_source_chain = src_path is not None and any(
+            f.file_path == src_path for f in chain
+        )
+
+        if is_source_chain:
+            chain_header = f"  Chain {letter} — SOURCE \u2605  ({chain_size})"
+        elif group.source_file is not None:
+            chain_header = click.style(
+                f"  Chain {letter} — COPY  ({chain_size} wasted)", fg="red"
+            )
+        else:
+            chain_header = f"  Chain {letter}  ({chain_size})"
+
+        click.echo(chain_header)
+
+        for file_idx, f in enumerate(chain):
+            is_src = f.file_path == src_path
+            in_source_dir = f.file_path.resolve().is_relative_to(source_dir_r)
+            dir_tag = "source" if in_source_dir else "target"
+            size = format_size(f.file_size or 0)
+
+            if is_source_chain:
+                tags = ["source \u2605"] if is_src else [dir_tag, "hardlink"]
+            else:
+                # Copy chain: first file is the representative; rest are hardlinks.
+                tags = [dir_tag] if file_idx == 0 else [dir_tag, "hardlink"]
+
+            tag_str = f"  [{', '.join(tags)}]"
+            click.echo(f"    \u2022 {f.file_path} ({size}){tag_str}")
+
+        click.echo()
+
+
 def display_groups(groups: list[DuplicateSet], source_dir: Path) -> None:
     """Display duplicate sets with formatting."""
     if not groups:
@@ -156,36 +196,24 @@ def display_groups(groups: list[DuplicateSet], source_dir: Path) -> None:
 
         click.echo()
 
-        # Files per directory, sorted so source is first
-        dirs = sorted(
-            group.files_by_dir.keys(), key=lambda d: (d != source_dir_r, str(d))
-        )
-        for d in dirs:
-            label = "Source" if d == source_dir_r else "Target"
-            click.echo(f"{label}: {d}")
-            for f in group.files_by_dir[d]:
-                size = format_size(f.file_size or 0)
-                is_source = (
-                    group.source_file is not None
-                    and f.file_path == group.source_file.file_path
-                )
-                star = " ★" if is_source else ""
-
-                # Annotate hardlink/copy status per file
-                pair_status = ""
-                if group.source_file and not is_source:
-                    in_hl = any(
-                        f.file_path == b.file_path for _, b in group.hardlink_pairs
+        if group.inode_chains:
+            _display_chains(group, source_dir_r)
+        else:
+            # Fallback: flat per-directory listing (legacy / no-inode-info case)
+            dirs = sorted(
+                group.files_by_dir.keys(), key=lambda d: (d != source_dir_r, str(d))
+            )
+            for d in dirs:
+                label = "Source" if d == source_dir_r else "Target"
+                click.echo(f"{label}: {d}")
+                for f in group.files_by_dir[d]:
+                    size = format_size(f.file_size or 0)
+                    is_src = (
+                        group.source_file is not None
+                        and f.file_path == group.source_file.file_path
                     )
-                    in_cp = any(
-                        f.file_path == b.file_path for _, b in group.copy_pairs
-                    )
-                    if in_hl:
-                        pair_status = "  [hardlink]"
-                    elif in_cp:
-                        pair_status = "  [copy]"
-
-                click.echo(f"  • {f.file_path} ({size}){star}{pair_status}")
+                    star = " ★" if is_src else ""
+                    click.echo(f"  • {f.file_path} ({size}){star}")
 
 
 def display_summary(
@@ -254,6 +282,9 @@ def export_json(
                     str(d): [str(f.file_path) for f in files]
                     for d, files in g.files_by_dir.items()
                 },
+                "inode_chains": [
+                    [str(f.file_path) for f in chain] for chain in g.inode_chains
+                ],
                 "hardlink_pairs": [
                     [str(a.file_path), str(b.file_path)] for a, b in g.hardlink_pairs
                 ],

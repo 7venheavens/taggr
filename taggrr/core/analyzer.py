@@ -34,6 +34,22 @@ class IDExtractor:
         (r"fc2-ppv-(\d{6,8})", "{}", SourceType.FC2, 0.95),
         (r"FC2PPV-(\d{6,8})", "{}", SourceType.FC2, 0.90),
         (r"ppv-(\d{6,8})", "{}", SourceType.FC2, 0.80),
+        # 1Pondo / 1pon date IDs (e.g. 102116_410, 100915_3257)
+        (r"(?:1pondo|1pon)[-_\s]*(\d{6}_\d{3,4})", "{}", SourceType.GENERIC, 0.92),
+        (r"(\d{6}_\d{3,4})[-_\s]*(?:1pondo|1pon)", "{}", SourceType.GENERIC, 0.92),
+        # Caribbean / CaribbeanPR / Carrib variants (e.g. 121616_005, 21418_003)
+        (
+            r"(?:carib(?:bean)?(?:pr)?|carrib(?:ean)?(?:pr)?)[-_\s]*(\d{5,6}_\d{3,4})",
+            "{}",
+            SourceType.GENERIC,
+            0.90,
+        ),
+        (
+            r"(\d{5,6}_\d{3,4})[-_\s]*(?:carib(?:bean)?(?:pr)?|carrib(?:ean)?(?:pr)?)",
+            "{}",
+            SourceType.GENERIC,
+            0.90,
+        ),
     ]
 
     # Medium confidence patterns
@@ -41,7 +57,7 @@ class IDExtractor:
         (r"([A-Z]{2,5}-\d{3,4})", "{}", SourceType.DMM, 0.75),  # MIDE-123, SSNI-456
         (r"([A-Z]{2,5}_\d{3,4})", "{}", SourceType.DMM, 0.75),  # MIDE_123, SSNI_456
         (r"([A-Z]{3,5}\d{3,4})", "{}", SourceType.DMM, 0.65),  # MIDE123
-        (r"(\d{6}_\d{3})", "{}", SourceType.DMM, 0.70),  # 123456_001
+        (r"(\d{6}_\d{3,4})", "{}", SourceType.DMM, 0.70),  # 123456_001 / 123456_1234
     ]
 
     # Weak patterns - need source hints
